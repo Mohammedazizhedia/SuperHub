@@ -10,9 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,11 +19,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bfbai.superhub.MainViewModel
 import com.bfbai.superhub.SyncItem
+import com.bfbai.superhub.sync.SyncManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(viewModel: MainViewModel, onStartOverlay: () -> Unit) {
     val history by viewModel.history.collectAsState()
+    var ipAddress by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -50,16 +50,37 @@ fun HomeScreen(viewModel: MainViewModel, onStartOverlay: () -> Unit) {
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            Text("الأجهزة المتصلة", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
-            DeviceCard("جهازي (هذا الهاتف)", true)
-            
+            // قسم الاتصال بجهاز تاني
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("الاتصال بجهاز (اختبار)", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = ipAddress,
+                        onValueChange = { ipAddress = it },
+                        label = { Text("IP Address (مثلاً 192.168.1.5)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { SyncManager.connectToDevice(ipAddress) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("اتصال")
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
             
             Text("آخر ما تمت مزامنته", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
             
             if (history.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("اضغط على زرار + لتشغيل الستارة العائمة.", color = Color.Gray)
+                    Text("انسخ أي نص من أي تطبيق تاني، وشوف الستارة هتتغير ولا لأ.", color = Color.Gray)
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -68,21 +89,6 @@ fun HomeScreen(viewModel: MainViewModel, onStartOverlay: () -> Unit) {
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun DeviceCard(name: String, isActive: Boolean) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(12.dp).background(if (isActive) Color(0xFF2ECC71) else Color.Gray, RoundedCornerShape(50)))
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(name, fontWeight = FontWeight.Medium)
         }
     }
 }

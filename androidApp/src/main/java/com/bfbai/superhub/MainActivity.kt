@@ -8,11 +8,8 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.bfbai.superhub.service.OverlayService
@@ -27,37 +24,59 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             SuperHubTheme {
-                var showPermissionDialog by remember { mutableStateOf(false) }
+                var showOverlayDialog by remember { mutableStateOf(false) }
+                var showAccessDialog by remember { mutableStateOf(false) }
 
                 HomeScreen(
                     viewModel = viewModel,
                     onStartOverlay = {
                         if (!Settings.canDrawOverlays(this)) {
-                            showPermissionDialog = true
+                            showOverlayDialog = true
                         } else {
                             startService(Intent(this, OverlayService::class.java))
+                            // بعد ما الستارة تشتغل، نطلب صلاحية قراءة الحافظة
+                            if (!isAccessibilityServiceEnabled()) {
+                                showAccessDialog = true
+                            }
                         }
                     }
                 )
 
-                if (showPermissionDialog) {
+                if (showOverlayDialog) {
                     AlertDialog(
-                        onDismissRequest = { showPermissionDialog = false },
-                        title = { Text("صلاحية الستارة العائمة") },
-                        text = { Text("محتاجين صلاحية عشان نعرض الـ Hub فوق التطبيقات التانية.") },
+                        onDismissRequest = { showOverlayDialog = false },
+                        title = { Text("صلاحية الستارة") },
+                        text = { Text("محتاجين صلاحية عشان نعرض الستارة فوق التطبيقات.") },
                         confirmButton = {
                             Button(onClick = {
-                                showPermissionDialog = false
+                                showOverlayDialog = false
                                 val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
                                 startActivity(intent)
+                            }) { Text("موافق") }
+                        }
+                    )
+                }
+
+                if (showAccessDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showAccessDialog = false },
+                        title = { Text("صلاحية قراءة الحافظة") },
+                        text = { Text("محتاجين نفعل خدمة SuperHub من إعدادات إمكانية الوصول عشان نقدر نقرا اللي بتنسخه.") },
+                        confirmButton = {
+                            Button(onClick = {
+                                showAccessDialog = false
+                                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                             }) { Text("افتح الإعدادات") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showPermissionDialog = false }) { Text("إلغاء") }
                         }
                     )
                 }
             }
         }
+    }
+
+    private fun isAccessibilityServiceEnabled(): Boolean {
+        val service = packageName + "/" + com.bfbai.superhub.service.ClipboardAccessibilityService::class.java.canonicalName
+        val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        return enabledServices?.contains(service) == true
     }
 }

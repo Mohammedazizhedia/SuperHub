@@ -24,7 +24,7 @@ object SyncManager {
     private val json = Json { ignoreUnknownKeys = true }
     
     val deviceId = UUID.randomUUID().toString().take(6)
-    
+
     fun startServer(onMessageReceived: (String) -> Unit) {
         scope.launch {
             try {
