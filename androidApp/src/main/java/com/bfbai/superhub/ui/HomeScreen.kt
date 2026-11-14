@@ -24,7 +24,7 @@ import com.bfbai.superhub.SyncItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: MainViewModel) {
+fun HomeScreen(viewModel: MainViewModel, onStartOverlay: () -> Unit) {
     val history by viewModel.history.collectAsState()
 
     Scaffold(
@@ -39,8 +39,8 @@ fun HomeScreen(viewModel: MainViewModel) {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { viewModel.addSyncItem("نص تجريبي ${history.size + 1}") }) {
-                Icon(Icons.Default.Add, contentDescription = "Add")
+            FloatingActionButton(onClick = onStartOverlay) {
+                Icon(Icons.Default.Add, contentDescription = "تشغيل الستارة")
             }
         }
     ) { padding ->
@@ -59,7 +59,7 @@ fun HomeScreen(viewModel: MainViewModel) {
             
             if (history.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("مفيش حاجة هنا لسه. اضغط + لتجربة المزامنة.", color = Color.Gray)
+                    Text("اضغط على زرار + لتشغيل الستارة العائمة.", color = Color.Gray)
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
