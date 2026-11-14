@@ -34,8 +34,13 @@ class OverlayService : Service() {
         SyncManager.startServer { receivedText ->
             scope.launch {
                 textView.text = "مستقبل:\n$receivedText"
-                // تم تصحيح الخطأ هنا (كان بيكتب toggleOverlay)
-                if (!isExpanded) toggleSize() 
+                // لو الستارة مقفولة، نفتحها (بنجيب الـ View ونعمل التحديث)
+                if (!isExpanded) {
+                    mainView.layoutParams = LinearLayout.LayoutParams(200, 200)
+                    textView.text = "SuperHub\n(ID: ${SyncManager.deviceId})"
+                    isExpanded = true
+                    windowManager.updateViewLayout(mainView, params)
+                }
             }
         }
     }
@@ -74,6 +79,7 @@ class OverlayService : Service() {
         
         mainView.addView(textView)
 
+        // دالة التصغير والتكبير
         fun toggleSize() {
             if (isExpanded) {
                 mainView.layoutParams = LinearLayout.LayoutParams(150, 150)
