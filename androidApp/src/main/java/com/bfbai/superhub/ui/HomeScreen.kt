@@ -1,6 +1,7 @@
 // Built with BFB.AI
 package com.bfbai.superhub.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -64,7 +65,11 @@ fun HomeScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(12.dp).background(Color(0xFF2ECC71), RoundedCornerShape(50)))
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(Color(0xFF2ECC71), RoundedCornerShape(50))
+                    )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text("جهازي (هذا الهاتف)", fontWeight = FontWeight.Medium)
                 }
