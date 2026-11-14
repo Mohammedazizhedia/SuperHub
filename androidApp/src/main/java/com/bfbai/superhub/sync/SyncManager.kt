@@ -4,6 +4,8 @@ package com.bfbai.superhub.sync
 import android.util.Log
 import com.bfbai.superhub.SyncMessage
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedReader
@@ -24,7 +26,21 @@ object SyncManager {
     private val json = Json { ignoreUnknownKeys = true }
     
     val deviceId = UUID.randomUUID().toString().take(6)
-    
+
+    private val _overlayEvents = MutableSharedFlow<String>()
+    val overlayEvents: SharedFlow<String> = _overlayEvents
+
+    private val _historyEvents = MutableSharedFlow<String>()
+    val historyEvents: SharedFlow<String> = _historyEvents
+
+    fun addToHistory(text: String) {
+        scope.launch { _historyEvents.emit(text) }
+    }
+
+    fun broadcastToOverlay(text: String) {
+        scope.launch { _overlayEvents.emit(text) }
+    }
+
     fun startServer(onMessageReceived: (String) -> Unit) {
         scope.launch {
             try {
@@ -33,7 +49,6 @@ object SyncManager {
                 
                 while (isActive) {
                     val client = serverSocket?.accept() ?: break
-                    Log.d(TAG, "Client connected: ${client.inetAddress}")
                     handleClient(client, onMessageReceived)
                 }
             } catch (e: Exception) {
@@ -47,12 +62,15 @@ object SyncManager {
             try {
                 clientSocket = Socket(ip, PORT)
                 writer = PrintWriter(clientSocket!!.getOutputStream(), true)
-                Log.d(TAG, "Connected to $ip")
                 
                 val reader = BufferedReader(InputStreamReader(clientSocket!!.getInputStream()))
                 while (isActive) {
                     val line = reader.readLine() ?: break
-                    Log.d(TAG, "Received: $line")
+                    val msg = json.decodeFromString<SyncMessage>(line)
+                    if (msg.type == "clipboard") {
+                        addToHistory(msg.content)
+                        broadcastToOverlay(msg.content)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Connection error: ${e.message}")
@@ -66,7 +84,6 @@ object SyncManager {
                 val message = SyncMessage(content = text, deviceId = deviceId)
                 val jsonString = json.encodeToString(message)
                 writer?.println(jsonString)
-                Log.d(TAG, "Sent: $text")
             } catch (e: Exception) {
                 Log.e(TAG, "Send error: ${e.message}")
             }
@@ -84,7 +101,8 @@ object SyncManager {
                     val line = reader.readLine() ?: break
                     val msg = json.decodeFromString<SyncMessage>(line)
                     if (msg.type == "clipboard") {
-                        onMessageReceived(msg.content)
+                        addToHistory(msg.content)
+                        broadcastToOverlay(msg.content)
                     }
                 }
             } catch (e: Exception) {
