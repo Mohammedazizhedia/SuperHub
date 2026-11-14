@@ -1,0 +1,28 @@
+// Built with BFB.AI
+package com.bfbai.superhub.theme
+import androidx.compose.ui.graphics.Color
+val PrimaryLight = Color(0xFF0B1B3A)
+val SecondaryLight = Color(0xFF3A4A6B)
+val AccentLight = Color(0xFF00A6A6)
+val BackgroundLight = Color(0xFFF7F9FC)
+val SurfaceLight = Color(0xFFFFFFFF)
+val ErrorLight = Color(0xFFFF5A5F)
+val SuccessLight = Color(0xFF2ECC71)
+val WarningLight = Color(0xFFF5A623)
+val OnSurfaceLight = Color(0xFF0B1B3A)
+val OnSurfaceMutedLight = Color(0x8C0B1B3A)
+val GlassBgLight = Color(0xB8FFFFFF)
+val GlassBorderLight = Color(0x99FFFFFF)
+
+val PrimaryDark = Color(0xFF4DE1E1)
+val SecondaryDark = Color(0xFFA9B8D4)
+val AccentDark = Color(0xFF00A6A6)
+val BackgroundDark = Color(0xFF0B1B3A)
+val SurfaceDark = Color(0xFF13264D)
+val ErrorDark = Color(0xFFFF5A5F)
+val SuccessDark = Color(0xFF2ECC71)
+val WarningDark = Color(0xFFF5A623)
+val OnSurfaceDark = Color(0xFFE8EEF7)
+val OnSurfaceMutedDark = Color(0x8CE8EEF7)
+val GlassBgDark = Color(0xB813264D)
+val GlassBorderDark = Color(0x2E4DE1E1)
