@@ -1,13 +1,13 @@
 // Built with BFB.AI
 package com.bfbai.superhub.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,7 +23,11 @@ import com.bfbai.superhub.sync.SyncManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(viewModel: MainViewModel, onStartOverlay: () -> Unit) {
+fun HomeScreen(
+    viewModel: MainViewModel,
+    isOverlayVisible: Boolean, // متغير جديد عشان نعرف الستارة شغالة ولا لأ
+    onToggleOverlay: () -> Unit // زرار التشغيل/الإيقاف
+) {
     val history by viewModel.history.collectAsState()
     var ipAddress by remember { mutableStateOf("") }
 
@@ -39,8 +43,15 @@ fun HomeScreen(viewModel: MainViewModel, onStartOverlay: () -> Unit) {
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onStartOverlay) {
-                Icon(Icons.Default.Add, contentDescription = "تشغيل الستارة")
+            // الزرار بيغير شكله ولونه حسب حالة الستارة
+            FloatingActionButton(
+                onClick = onToggleOverlay,
+                containerColor = if (isOverlayVisible) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            ) {
+                Icon(
+                    imageVector = if (isOverlayVisible) Icons.Default.Clear else Icons.Default.Add,
+                    contentDescription = if (isOverlayVisible) "إخفاء الستارة" else "إظهار الستارة"
+                )
             }
         }
     ) { padding ->
@@ -50,7 +61,6 @@ fun HomeScreen(viewModel: MainViewModel, onStartOverlay: () -> Unit) {
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            // قسم الاتصال بجهاز تاني
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
