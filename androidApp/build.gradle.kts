@@ -7,9 +7,18 @@ plugins {
 android {
     namespace = "com.bfbai.superhub"
     compileSdk = 34
-    defaultConfig { applicationId = "com.bfbai.superhub"; minSdk = 26; targetSdk = 34; versionCode = 1; versionName = "1.0.0" }
+    defaultConfig { 
+        applicationId = "com.bfbai.superhub"
+        minSdk = 26
+        targetSdk = 34
+        versionCode = (project.findProperty("superhub.versionCode") as String?)?.toInt() ?: 1
+        versionName = project.findProperty("superhub.versionName") as String? ?: "1.0.0"
+    }
     buildFeatures { compose = true }
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
+    compileOptions { 
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17 
+    }
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
