@@ -15,21 +15,34 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
 
-      - name: Make scripts executable
-        run: chmod +x scripts/*.sh
-
-      - name: Run scaffold scripts
+      - name: Find and Execute Scripts Dynamically
         run: |
-          ./scripts/part1.sh
-          ./scripts/part2.sh
-          ./scripts/part3.sh
-          ./scripts/part4.sh
-          ./scripts/part5.sh
+          # البحث عن كل الملفات اللي بتبدأ بـ part وبتنتهي بـ sh وترتيبها أبجدياً
+          SCRIPTS=$(find scripts -type f -name "part*.sh" | sort)
+          
+          if [ -z "$SCRIPTS" ]; then
+            echo "⚠️ No scripts found to execute."
+            exit 0
+          fi
+          
+          for script in $SCRIPTS; do
+            echo "======================================"
+            echo "▶️ Executing: $script"
+            echo "======================================"
+            chmod +x "$script"
+            bash "$script"
+          done
+          echo "✅ All scripts executed successfully."
 
       - name: Commit and Push changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add .
-          git commit -m "Full Code & Translations — Built with BFB.AI"
-          git push
+          # التأكد إن فيه تغييرات قبل الـ commit عشان ميعملش Error
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-scaffold: Dynamic build — Built with BFB.AI"
+            git push
+          else
+            echo "No changes to commit."
+          fi
