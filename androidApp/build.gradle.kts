@@ -4,6 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
 android {
     namespace = "com.bfbai.superhub"
     compileSdk = 34
@@ -20,7 +21,36 @@ android {
         targetCompatibility = JavaVersion.VERSION_17 
     }
     kotlinOptions { jvmTarget = "17" }
+
+    signingConfigs {
+        create("release") {
+            // قراءة البيانات مباشرة من متغيرات البيئة التي يمررها الـ Workflow
+            val storeFilePath = System.getenv("KEYSTORE_FILE") ?: "release.jks"
+            val storePass = System.getenv("KEYSTORE_PASSWORD")
+            val alias = System.getenv("KEY_ALIAS")
+            val keyPass = System.getenv("KEY_PASSWORD")
+
+            if (storePass != null && alias != null && keyPass != null) {
+                storeFile = file(storeFilePath)
+                storePassword = storePass
+                keyAlias = alias
+                keyPassword = keyPass
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // ربط التوقيع ببناء الـ Release
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
 }
+
 dependencies {
     implementation(project(":shared"))
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
