@@ -18,8 +18,8 @@ jobs:
 
       - name: Find and Execute Scripts Dynamically
         run: |
-          # الترتيب مهم جداً هنا: 10 (توقيع) -> 13 (كود) -> 12 (مميزات) -> 10 (توقيع تاني كلمسة أخيرة)
-          for script in scripts/part10.sh scripts/part13.sh scripts/part12.sh scripts/part10.sh; do
+          # 1. تشغيل كل السكريبتات اللي في الفولدر بالترتيب
+          for script in $(find scripts -type f -name "*.sh" | sort); do
             if [ -f "$script" ]; then
               echo "======================================"
               echo "▶️ Executing: $script"
@@ -28,7 +28,16 @@ jobs:
               bash "$script"
             fi
           done
-          echo "✅ All targeted scripts executed successfully."
+          
+          # 2. تشغيل سكريبت التوقيع (10) كآخر خطوة عشان يضمن إن التوقيع سليم
+          if [ -f "scripts/part10.sh" ]; then
+            echo "======================================"
+            echo "▶️ Locking Signing Configuration (part10.sh)"
+            echo "======================================"
+            chmod +x scripts/part10.sh
+            bash scripts/part10.sh
+          fi
+          echo "✅ All scripts executed successfully."
 
       - name: Commit and Push changes
         run: |
@@ -36,7 +45,7 @@ jobs:
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add .
           if ! git diff --staged --quiet; then
-            git commit -m "Auto-scaffold: Final Build — Built with BFB.AI"
+            git commit -m "Auto-scaffold: Full Build — Built with BFB.AI"
             git pull --rebase origin main
             git push
           else
