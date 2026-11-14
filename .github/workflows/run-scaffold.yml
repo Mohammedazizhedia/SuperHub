@@ -17,31 +17,25 @@ jobs:
 
       - name: Find and Execute Scripts Dynamically
         run: |
-          # البحث عن كل الملفات اللي بتبدأ بـ part وبتنتهي بـ sh وترتيبها أبجدياً
-          SCRIPTS=$(find scripts -type f -name "part*.sh" | sort)
-          
-          if [ -z "$SCRIPTS" ]; then
-            echo "⚠️ No scripts found to execute."
-            exit 0
-          fi
-          
-          for script in $SCRIPTS; do
-            echo "======================================"
-            echo "▶️ Executing: $script"
-            echo "======================================"
-            chmod +x "$script"
-            bash "$script"
+          # تشغيل السكريبت رقم 10 الأول عشان يثبت التوقيع، وبعدين رقم 11
+          for script in scripts/part10.sh scripts/part11.sh; do
+            if [ -f "$script" ]; then
+              echo "======================================"
+              echo "▶️ Executing: $script"
+              echo "======================================"
+              chmod +x "$script"
+              bash "$script"
+            fi
           done
-          echo "✅ All scripts executed successfully."
+          echo "✅ All targeted scripts executed successfully."
 
       - name: Commit and Push changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add .
-          # التأكد إن فيه تغييرات قبل الـ commit عشان ميعملش Error
           if ! git diff --staged --quiet; then
-            git commit -m "Auto-scaffold: Dynamic build — Built with BFB.AI"
+            git commit -m "Auto-scaffold: Part 11 (UI & Sync) — Built with BFB.AI"
             git push
           else
             echo "No changes to commit."
