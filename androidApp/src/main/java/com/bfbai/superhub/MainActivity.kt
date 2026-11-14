@@ -10,7 +10,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.unit.dp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.bfbai.superhub.service.OverlayService
 import com.bfbai.superhub.theme.SuperHubTheme
@@ -34,7 +33,7 @@ class MainActivity : ComponentActivity() {
                             showOverlayDialog = true
                         } else {
                             startService(Intent(this, OverlayService::class.java))
-                            // بعد ما الستارة تشتغل، نطلب صلاحية قراءة الحافظة
+                            // طلب صلاحية قراءة الحافظة
                             if (!isAccessibilityServiceEnabled()) {
                                 showAccessDialog = true
                             }
@@ -61,7 +60,7 @@ class MainActivity : ComponentActivity() {
                     AlertDialog(
                         onDismissRequest = { showAccessDialog = false },
                         title = { Text("صلاحية قراءة الحافظة") },
-                        text = { Text("محتاجين نفعل خدمة SuperHub من إعدادات إمكانية الوصول عشان نقدر نقرا اللي بتنسخه.") },
+                        text = { Text("محتاجين نفعل خدمة SuperHub من إعدادات إمكانية الوصول.") },
                         confirmButton = {
                             Button(onClick = {
                                 showAccessDialog = false
