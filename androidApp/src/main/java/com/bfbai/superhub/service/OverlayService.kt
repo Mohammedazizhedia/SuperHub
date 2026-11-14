@@ -11,6 +11,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.LinearLayout
 import android.widget.TextView
 import com.bfbai.superhub.sync.SyncManager
 import kotlinx.coroutines.*
@@ -18,10 +19,11 @@ import kotlinx.coroutines.*
 class OverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private lateinit var overlayView: View
+    private lateinit var mainView: LinearLayout
     private lateinit var textView: TextView
     private lateinit var params: WindowManager.LayoutParams
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var isExpanded = true 
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate() {
@@ -29,11 +31,24 @@ class OverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         showOverlay()
         
-        SyncManager.startServer { receivedText ->
-            scope.launch {
+        // الاستماع لأي نص جديد
+        scope.launch {
+            SyncManager.overlayEvents.collect { receivedText ->
                 textView.text = "مستقبل:\n$receivedText"
+                if (!isExpanded) {
+                    mainView.layoutParams = LinearLayout.LayoutParams(300, 300)
+                    isExpanded = true
+                    windowManager.updateViewLayout(mainView, params)
+                }
             }
         }
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "SHOW_OVERLAY") {
+            mainView.visibility = View.VISIBLE
+        }
+        return START_STICKY
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -54,19 +69,40 @@ class OverlayService : Service() {
         params.x = 50
         params.y = 100
 
-        textView = TextView(this).apply {
-            text = "SuperHub Hub\n(اسحبني)\nID: ${SyncManager.deviceId}"
+        mainView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF0B1B3A.toInt())
-            setTextColor(0xFF4DE1E1.toInt())
             setPadding(40, 40, 40, 40)
+            layoutParams = LinearLayout.LayoutParams(300, 300) 
+            gravity = Gravity.CENTER
         }
 
-        // إضافة مستمع اللمس لتفعيل السحب
-        textView.setOnTouchListener(object : View.OnTouchListener {
+        textView = TextView(this).apply {
+            text = "SuperHub\n(ID: ${SyncManager.deviceId})"
+            setTextColor(0xFF4DE1E1.toInt())
+            textSize = 14f
+        }
+        
+        mainView.addView(textView)
+
+        fun toggleSize() {
+            if (isExpanded) {
+                mainView.layoutParams = LinearLayout.LayoutParams(150, 150)
+                textView.text = "SH"
+            } else {
+                mainView.layoutParams = LinearLayout.LayoutParams(300, 300)
+                textView.text = "SuperHub\n(ID: ${SyncManager.deviceId})"
+            }
+            isExpanded = !isExpanded
+            windowManager.updateViewLayout(mainView, params)
+        }
+
+        mainView.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
             private var initialTouchY = 0f
+            private var isDragging = false
 
             override fun onTouch(v: View?, event: MotionEvent?): Boolean {
                 when (event?.action) {
@@ -75,12 +111,21 @@ class OverlayService : Service() {
                         initialY = params.y
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
+                        isDragging = false
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        params.x = initialX + (event.rawX - initialTouchX).toInt()
-                        params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        windowManager.updateViewLayout(overlayView, params)
+                        val deltaX = (event.rawX - initialTouchX).toInt()
+                        val deltaY = (event.rawY - initialTouchY).toInt()
+                        if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) isDragging = true
+                        
+                        params.x = initialX + deltaX
+                        params.y = initialY + deltaY
+                        windowManager.updateViewLayout(mainView, params)
+                        return true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!isDragging) toggleSize()
                         return true
                     }
                 }
@@ -88,14 +133,13 @@ class OverlayService : Service() {
             }
         })
 
-        overlayView = textView
-        windowManager.addView(overlayView, params)
+        windowManager.addView(mainView, params)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::overlayView.isInitialized) {
-            windowManager.removeView(overlayView)
+        if (::mainView.isInitialized) {
+            windowManager.removeView(mainView)
         }
         scope.cancel()
     }
