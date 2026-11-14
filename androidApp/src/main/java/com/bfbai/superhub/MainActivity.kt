@@ -17,6 +17,9 @@ import com.bfbai.superhub.ui.HomeScreen
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
+    
+    // متغير عشان نتابع حالة الستارة
+    private var isOverlayRunning by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -28,14 +31,22 @@ class MainActivity : ComponentActivity() {
 
                 HomeScreen(
                     viewModel = viewModel,
-                    onStartOverlay = {
-                        if (!Settings.canDrawOverlays(this)) {
-                            showOverlayDialog = true
+                    isOverlayVisible = isOverlayRunning,
+                    onToggleOverlay = {
+                        if (isOverlayRunning) {
+                            // لو شغالة، اقفلها
+                            stopService(Intent(this, OverlayService::class.java))
+                            isOverlayRunning = false
                         } else {
-                            startService(Intent(this, OverlayService::class.java))
-                            // طلب صلاحية قراءة الحافظة
-                            if (!isAccessibilityServiceEnabled()) {
-                                showAccessDialog = true
+                            // لو مقفولة، شغلها
+                            if (!Settings.canDrawOverlays(this)) {
+                                showOverlayDialog = true
+                            } else {
+                                startService(Intent(this, OverlayService::class.java))
+                                isOverlayRunning = true
+                                if (!isAccessibilityServiceEnabled()) {
+                                    showAccessDialog = true
+                                }
                             }
                         }
                     }
