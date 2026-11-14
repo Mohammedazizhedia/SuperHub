@@ -32,19 +32,15 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > androidApp/release.jks
-            cat > keystore.properties <<EOF
-          storeFile=release.jks
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          EOF
-          else
-            echo "⚠️ KEYSTORE_BASE64 is empty! APK will be unsigned."
-          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > androidApp/release.jks
+          ls -la androidApp/release.jks
 
       - name: Build Release APK
+        env:
+          KEYSTORE_FILE: "release.jks"
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew :androidApp:assembleRelease --stacktrace
 
       - name: Upload APK
