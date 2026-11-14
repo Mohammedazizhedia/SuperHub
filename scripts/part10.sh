@@ -2,25 +2,29 @@
 # Built with BFB.AI — Part 10: Final Build Configuration
 set -euo pipefail
 
-# 1. تثبيت إعدادات التوقيع والجافا في androidApp (عشان متمسحش تاني)
+# 1. تثبيت إعدادات التوقيع والجافا في androidApp
 cat > androidApp/build.gradle.kts <<'EOF'
 // Built with BFB.AI
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 android {
     namespace = "com.bfbai.superhub"
     compileSdk = 34
+    
     defaultConfig { 
         applicationId = "com.bfbai.superhub"
         minSdk = 26
         targetSdk = 34
+        // قراءة الأرقام من ملف gradle.properties
         versionCode = (project.findProperty("superhub.versionCode") as String?)?.toInt() ?: 1
         versionName = project.findProperty("superhub.versionName") as String? ?: "1.0.0"
     }
+    
     buildFeatures { compose = true }
     compileOptions { 
         sourceCompatibility = JavaVersion.VERSION_17
@@ -49,7 +53,6 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -88,7 +91,7 @@ dependencies {
 }
 EOF
 
-# 2. تثبيت إعدادات الجافا في shared (عشان نمنع خطأ Java 17)
+# 2. تثبيت إعدادات الجافا في shared
 cat > shared/build.gradle.kts <<'EOF'
 // Built with BFB.AI
 plugins { 
