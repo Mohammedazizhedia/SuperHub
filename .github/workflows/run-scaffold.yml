@@ -1,0 +1,30 @@
+name: Run Scaffold Script
+
+on:
+  workflow_dispatch: # يسمح لك بتشغيله يدوياً من واجهة GitHub
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # صلاحية تعديل ورفع الملفات
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }} # التوكن الخاص بك
+
+      - name: Make script executable
+        run: chmod +x scripts/scaffold.sh
+
+      - name: Run scaffold script
+        run: ./scripts/scaffold.sh
+
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -m "Auto-scaffold: Project structure — Built with BFB.AI"
+          git push
