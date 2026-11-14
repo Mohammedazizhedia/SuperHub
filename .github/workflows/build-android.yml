@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build & Test
+    name: Build & Sign APK
     runs-on: ubuntu-latest
 
     steps:
@@ -30,12 +30,27 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew || true
 
-      - name: Build debug APK
-        run: ./gradlew :androidApp:assembleDebug --stacktrace
+      # إعداد مفتاح التوقيع من الـ Secrets
+      - name: Decode Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > androidApp/release.jks
+            cat > keystore.properties <<EOF
+          storeFile=release.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+          fi
+
+      - name: Build Release APK
+        run: ./gradlew :androidApp:assembleRelease --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: SuperHub-debug
-          path: androidApp/build/outputs/apk/debug/*.apk
+          name: SuperHub-APK
+          path: androidApp/build/outputs/apk/release/*.apk
           retention-days: 14
