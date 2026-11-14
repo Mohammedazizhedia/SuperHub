@@ -106,7 +106,7 @@ object SyncManager {
 }
 EOF
 
-# 2. OverlayService (مع خاصية التصغير والتكبير)
+# 2. OverlayService (تم تصحيح toggleOverlay إلى toggleSize)
 cat > androidApp/src/main/java/com/bfbai/superhub/service/OverlayService.kt <<'EOF'
 // Built with BFB.AI
 package com.bfbai.superhub.service
