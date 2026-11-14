@@ -1,0 +1,19 @@
+BFB.AI
+Built For Benefits, by AI
+
+Project: SuperHub
+Version: 1.0.0
+Build: 001
+Date: 2026-11-14
+
+Signature locations:
+- Splash (bottom, 60% alpha)
+- About (full line + meaning AR/EN)
+- Star Overlay (footer, 11sp, 60% alpha)
+- README (header)
+- Changelog (header)
+- Security report (header)
+- Code header (first line of each main file)
+- This file (BFB.txt in every ZIP)
+
+Logo files: assets/brand/BFB_light.svg / BFB_dark.svg / BFB_mono.svg
