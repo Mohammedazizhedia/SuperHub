@@ -4,6 +4,7 @@ package com.bfbai.superhub.service
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import com.bfbai.superhub.sync.SyncManager
@@ -24,6 +25,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 if (!text.isNullOrEmpty() && text != lastText) {
                     lastText = text
                     Log.d("ClipboardService", "Copied: $text")
+                    
+                    // 1. حفظ في السجل
+                    SyncManager.addToHistory(text)
+                    
+                    // 2. إرسال للستارة عشان تظهر بالنص
+                    SyncManager.broadcastToOverlay(text)
+                    
+                    // 3. إرسال لجهاز تاني (لو متصل)
                     SyncManager.sendClipboard(text)
                 }
             }
