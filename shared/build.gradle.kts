@@ -6,15 +6,12 @@ plugins {
 }
 
 kotlin {
-    // إجبار Kotlin على استخدام Java 17
     jvmToolchain(17)
-    
     androidTarget {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
         }
     }
-    
     sourceSets {
         commonMain.dependencies {
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
@@ -31,9 +28,7 @@ kotlin {
 android {
     namespace = "com.bfbai.superhub.shared"
     compileSdk = 34
-    defaultConfig { 
-        minSdk = 26 
-    }
+    defaultConfig { minSdk = 26 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
