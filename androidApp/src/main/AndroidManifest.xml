@@ -3,22 +3,16 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    
-    <!-- صلاحية الـ Overlay (الستارة) -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:name=".SuperHubApp"
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
         android:allowBackup="false"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="true">
         
         <activity
             android:name=".MainActivity"
@@ -30,12 +24,6 @@
             </intent-filter>
         </activity>
 
-        <service
-            android:name=".service.ForegroundSyncService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
-        <!-- خدمة الستارة العائمة -->
         <service
             android:name=".service.OverlayService"
             android:exported="false" />
@@ -50,6 +38,18 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- خدمة شريط الإشعارات -->
+        <service
+            android:name=".service.SuperHubTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_hub_tile"
+            android:label="SuperHub"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
         </service>
     </application>
 </manifest>

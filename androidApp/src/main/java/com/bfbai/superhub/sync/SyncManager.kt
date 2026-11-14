@@ -33,7 +33,6 @@ object SyncManager {
                 
                 while (isActive) {
                     val client = serverSocket?.accept() ?: break
-                    Log.d(TAG, "Client connected: ${client.inetAddress}")
                     handleClient(client, onMessageReceived)
                 }
             } catch (e: Exception) {
@@ -47,17 +46,19 @@ object SyncManager {
             try {
                 clientSocket = Socket(ip, PORT)
                 writer = PrintWriter(clientSocket!!.getOutputStream(), true)
-                Log.d(TAG, "Connected to $ip")
                 
                 val reader = BufferedReader(InputStreamReader(clientSocket!!.getInputStream()))
                 while (isActive) {
                     val line = reader.readLine() ?: break
-                    Log.d(TAG, "Received: $line")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Connection error: ${e.message}")
             }
         }
+    }
+
+    fun testLoopback(text: String, onReceived: (String) -> Unit) {
+        onReceived(text)
     }
 
     fun sendClipboard(text: String) {

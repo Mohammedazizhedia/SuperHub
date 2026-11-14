@@ -25,8 +25,8 @@ import com.bfbai.superhub.sync.SyncManager
 @Composable
 fun HomeScreen(
     viewModel: MainViewModel,
-    isOverlayVisible: Boolean, // متغير جديد عشان نعرف الستارة شغالة ولا لأ
-    onToggleOverlay: () -> Unit // زرار التشغيل/الإيقاف
+    isOverlayVisible: Boolean,
+    onToggleOverlay: () -> Unit
 ) {
     val history by viewModel.history.collectAsState()
     var ipAddress by remember { mutableStateOf("") }
@@ -43,7 +43,6 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            // الزرار بيغير شكله ولونه حسب حالة الستارة
             FloatingActionButton(
                 onClick = onToggleOverlay,
                 containerColor = if (isOverlayVisible) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
@@ -71,15 +70,28 @@ fun HomeScreen(
                     OutlinedTextField(
                         value = ipAddress,
                         onValueChange = { ipAddress = it },
-                        label = { Text("IP Address (مثلاً 192.168.1.5)") },
+                        label = { Text("IP Address") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = { SyncManager.connectToDevice(ipAddress) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("اتصال")
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { SyncManager.connectToDevice(ipAddress) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("اتصال")
+                        }
+                        Button(
+                            onClick = { 
+                                SyncManager.testLoopback("نص تجريبي من التطبيق!") { received ->
+                                    viewModel.addSyncItem(received)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                        ) {
+                            Text("اختبار")
+                        }
                     }
                 }
             }
