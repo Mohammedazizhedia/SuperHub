@@ -4,7 +4,6 @@ package com.bfbai.superhub.service
 import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Intent
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
@@ -24,8 +23,7 @@ class OverlayService : Service() {
     private lateinit var textView: TextView
     private lateinit var params: WindowManager.LayoutParams
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    
-    private var isExpanded = true // عشان نعرف الستارة مفتوحة ولا مقفولة
+    private var isExpanded = true 
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate() {
@@ -36,8 +34,8 @@ class OverlayService : Service() {
         SyncManager.startServer { receivedText ->
             scope.launch {
                 textView.text = "مستقبل:\n$receivedText"
-                // لو الستارة مقفولة، نفتحها لما يوصل نص جديد
-                if (!isExpanded) toggleOverlay() 
+                // تم تصحيح الخطأ هنا (كان بيكتب toggleOverlay)
+                if (!isExpanded) toggleSize() 
             }
         }
     }
@@ -64,36 +62,30 @@ class OverlayService : Service() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF0B1B3A.toInt())
             setPadding(30, 30, 30, 30)
-            // شكل الدايرة العائمة
-            layoutParams = LinearLayout.LayoutParams(150, 150) 
+            layoutParams = LinearLayout.LayoutParams(200, 200) 
             gravity = Gravity.CENTER
         }
 
         textView = TextView(this).apply {
-            text = "SuperHub\n(اسحبني)"
+            text = "SuperHub\n(ID: ${SyncManager.deviceId})"
             setTextColor(0xFF4DE1E1.toInt())
             textSize = 12f
         }
         
         mainView.addView(textView)
 
-        // دالة للتبديل بين التصغير والتكبير
         fun toggleSize() {
             if (isExpanded) {
-                mainView.layoutParams = LinearLayout.LayoutParams(150, 150) // تصغير
-                textView.text = "SH" // اختصار
+                mainView.layoutParams = LinearLayout.LayoutParams(150, 150)
+                textView.text = "SH"
             } else {
-                mainView.layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ) // تكبير
-                textView.text = "مستقبل:\n${SyncManager.deviceId}"
+                mainView.layoutParams = LinearLayout.LayoutParams(200, 200)
+                textView.text = "SuperHub\n(ID: ${SyncManager.deviceId})"
             }
             isExpanded = !isExpanded
             windowManager.updateViewLayout(mainView, params)
         }
 
-        // دالة السحب + الضغط
         mainView.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -122,9 +114,7 @@ class OverlayService : Service() {
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!isDragging) {
-                            toggleSize() // لو مجرد ضغطة، نغير الحجم
-                        }
+                        if (!isDragging) toggleSize()
                         return true
                     }
                 }
