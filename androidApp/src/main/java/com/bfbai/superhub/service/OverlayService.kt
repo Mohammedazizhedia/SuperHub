@@ -3,6 +3,9 @@ package com.bfbai.superhub.service
 
 import android.annotation.SuppressLint
 import android.app.Service
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
@@ -13,6 +16,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import com.bfbai.superhub.sync.SyncManager
 import kotlinx.coroutines.*
 
@@ -24,6 +28,7 @@ class OverlayService : Service() {
     private lateinit var params: WindowManager.LayoutParams
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isExpanded = true 
+    private var currentText = ""
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate() {
@@ -31,24 +36,19 @@ class OverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         showOverlay()
         
-        // الاستماع لأي نص جديد
+        // الاستماع لأي نص جديد عشان نحدث الستارة ونظهرها
         scope.launch {
             SyncManager.overlayEvents.collect { receivedText ->
+                currentText = receivedText
                 textView.text = "مستقبل:\n$receivedText"
+                // لو الستارة صغيرة، نكبره تلقائياً عشان يبان
                 if (!isExpanded) {
-                    mainView.layoutParams = LinearLayout.LayoutParams(300, 300)
+                    mainView.layoutParams = LinearLayout.LayoutParams(400, 400)
                     isExpanded = true
                     windowManager.updateViewLayout(mainView, params)
                 }
             }
         }
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "SHOW_OVERLAY") {
-            mainView.visibility = View.VISIBLE
-        }
-        return START_STICKY
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -73,25 +73,26 @@ class OverlayService : Service() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF0B1B3A.toInt())
             setPadding(40, 40, 40, 40)
-            layoutParams = LinearLayout.LayoutParams(300, 300) 
+            layoutParams = LinearLayout.LayoutParams(400, 400) 
             gravity = Gravity.CENTER
         }
 
         textView = TextView(this).apply {
             text = "SuperHub\n(ID: ${SyncManager.deviceId})"
             setTextColor(0xFF4DE1E1.toInt())
-            textSize = 14f
+            textSize = 16f
         }
         
         mainView.addView(textView)
 
+        // دالة التصغير والتكبير
         fun toggleSize() {
             if (isExpanded) {
                 mainView.layoutParams = LinearLayout.LayoutParams(150, 150)
                 textView.text = "SH"
             } else {
-                mainView.layoutParams = LinearLayout.LayoutParams(300, 300)
-                textView.text = "SuperHub\n(ID: ${SyncManager.deviceId})"
+                mainView.layoutParams = LinearLayout.LayoutParams(400, 400)
+                textView.text = if (currentText.isNotEmpty()) "مستقبل:\n$currentText" else "SuperHub\n(ID: ${SyncManager.deviceId})"
             }
             isExpanded = !isExpanded
             windowManager.updateViewLayout(mainView, params)
@@ -125,7 +126,17 @@ class OverlayService : Service() {
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!isDragging) toggleSize()
+                        if (!isDragging) {
+                            // لو ضغطة سريعة، ننسخ النص ونظهر إشعار
+                            if (currentText.isNotEmpty()) {
+                                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("SuperHub", currentText)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(this@OverlayService, "تم النسخ! تقدر تلصقه في أي مكان.", Toast.LENGTH_SHORT).show()
+                            } else {
+                                toggleSize()
+                            }
+                        }
                         return true
                     }
                 }
