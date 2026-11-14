@@ -18,8 +18,8 @@ jobs:
 
       - name: Find and Execute Scripts Dynamically
         run: |
-          # تشغيل السكريبت رقم 10 الأول عشان يثبت التوقيع، وبعدين رقم 11
-          for script in scripts/part10.sh scripts/part11.sh; do
+          # تشغيل 10 و 11 و 12 بس
+          for script in scripts/part10.sh scripts/part11.sh scripts/part12.sh; do
             if [ -f "$script" ]; then
               echo "======================================"
               echo "▶️ Executing: $script"
@@ -36,8 +36,7 @@ jobs:
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add .
           if ! git diff --staged --quiet; then
-            git commit -m "Auto-scaffold: Part 11 (UI & Sync) — Built with BFB.AI"
-            # سحب التحديثات الأخيرة قبل الرفع عشان نتجنب التعارض
+            git commit -m "Auto-scaffold: Part 12 (Final Features) — Built with BFB.AI"
             git pull --rebase origin main
             git push
           else
