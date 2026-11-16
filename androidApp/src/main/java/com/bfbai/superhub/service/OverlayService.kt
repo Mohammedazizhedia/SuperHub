@@ -14,56 +14,47 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.setViewTreeLifecycleOwner
-import androidx.savedstate.SavedStateRegistryOwner
-import androidx.savedstate.setViewTreeSavedStateRegistryOwner
-import androidx.lifecycle.setViewTreeViewModelStoreOwner
-import androidx.lifecycle.ViewModelStoreOwner
-import androidx.lifecycle.ViewModelStore
-import com.bfbai.superhub.sync.ClipboardItem
 import com.bfbai.superhub.sync.SyncManager
 import kotlinx.coroutines.*
 
-class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
+class OverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
+    private lateinit var mainView: LinearLayout
+    private lateinit var textView: TextView
     private lateinit var params: WindowManager.LayoutParams
-    private var composeView: ComposeView? = null
-    private val lifecycleRegistry = androidx.lifecycle.LifecycleRegistry(this)
-    private val store = ViewModelStore()
-    private val savedStateRegistryController = androidx.savedstate.SavedStateRegistryController.create(this)
-
-    override val lifecycle: androidx.lifecycle.Lifecycle get() = lifecycleRegistry
-    override val viewModelStore: ViewModelStore get() = store
-    override val savedStateRegistry: androidx.savedstate.SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    
+    private var isExpanded = true 
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate() {
         super.onCreate()
-        lifecycleRegistry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
-        savedStateRegistryController.performRestore(null)
-
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         showOverlay()
+        
+        // مراقبة النصوص الجديدة عشان تظهر في الستارة
+        scope.launch {
+            SyncManager.clipboardHistory.collect { history ->
+                if (history.isNotEmpty()) {
+                    // بنعرض آخر 3 نصوص بس عشان الشاشة متزحمش
+                    val textToShow = history.take(3).joinToString("\n\n") { it.text }
+                    textView.text = "آخر ما تم نسخه:\n$textToShow"
+                    
+                    if (!isExpanded) {
+                        mainView.layoutParams = LinearLayout.LayoutParams(400, 400)
+                        isExpanded = true
+                        windowManager.updateViewLayout(mainView, params)
+                    }
+                }
+            }
+        }
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun showOverlay() {
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -81,28 +72,35 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewM
         params.x = 50
         params.y = 100
 
-        composeView = ComposeView(this).apply {
-            setViewTreeLifecycleOwner(this@OverlayService)
-            setViewTreeSavedStateRegistryOwner(this@OverlayService)
-            setViewTreeViewModelStoreOwner(this@OverlayService)
-            
-            setContent {
-                val history by SyncManager.clipboardHistory.collectAsState()
-                OverlayContent(
-                    history = history, 
-                    onDelete = { SyncManager.removeFromHistory(it) }, 
-                    onCopy = { text ->
-                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        val clip = ClipData.newPlainText("SuperHub", text)
-                        clipboard.setPrimaryClip(clip)
-                        Toast.makeText(this@OverlayService, "تم النسخ!", Toast.LENGTH_SHORT).show()
-                    },
-                    deviceId = SyncManager.deviceId
-                )
-            }
+        mainView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xFF0B1B3A.toInt())
+            setPadding(40, 40, 40, 40)
+            layoutParams = LinearLayout.LayoutParams(400, 400) 
+            gravity = Gravity.CENTER
         }
 
-        composeView?.setOnTouchListener(object : View.OnTouchListener {
+        textView = TextView(this).apply {
+            text = "SuperHub\n(ID: ${SyncManager.deviceId})"
+            setTextColor(0xFF4DE1E1.toInt())
+            textSize = 16f
+        }
+        
+        mainView.addView(textView)
+
+        fun toggleSize() {
+            if (isExpanded) {
+                mainView.layoutParams = LinearLayout.LayoutParams(150, 150)
+                textView.text = "SH"
+            } else {
+                mainView.layoutParams = LinearLayout.LayoutParams(400, 400)
+                textView.text = "SuperHub\n(ID: ${SyncManager.deviceId})"
+            }
+            isExpanded = !isExpanded
+            windowManager.updateViewLayout(mainView, params)
+        }
+
+        mainView.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
@@ -126,7 +124,13 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewM
                         
                         params.x = initialX + deltaX
                         params.y = initialY + deltaY
-                        windowManager.updateViewLayout(composeView, params)
+                        windowManager.updateViewLayout(mainView, params)
+                        return true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!isDragging) {
+                            toggleSize()
+                        }
                         return true
                     }
                 }
@@ -134,72 +138,16 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewM
             }
         })
 
-        windowManager.addView(composeView, params)
+        windowManager.addView(mainView, params)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        lifecycleRegistry.currentState = androidx.lifecycle.Lifecycle.State.DESTROYED
-        if (composeView != null) {
-            windowManager.removeView(composeView)
+        if (::mainView.isInitialized) {
+            windowManager.removeView(mainView)
         }
+        scope.cancel()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-}
-
-@Composable
-fun OverlayContent(
-    history: List<ClipboardItem>, 
-    onDelete: (ClipboardItem) -> Unit, 
-    onCopy: (String) -> Unit,
-    deviceId: String
-) {
-    Surface(
-        modifier = Modifier.width(300.dp).heightIn(max = 450.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF0B1B3A),
-        shadowElevation = 12.dp
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text("SuperHub (ID: $deviceId)", color = Color(0xFF4DE1E1), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            if (history.isEmpty()) {
-                Text("مفيش نصوص محفوظة لسه", color = Color.Gray, fontSize = 14.sp)
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(history) { item ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF13264D)),
-                            shape = RoundedCornerShape(8.dp),
-                            onClick = { onCopy(item.text) }
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(item.text, color = Color.White, fontSize = 14.sp)
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(item.sourceApp, color = Color(0xFF4DE1E1), fontSize = 11.sp)
-                                    Text(
-                                        text = "حذف",
-                                        color = Color(0xFFFF5A5F),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(4.dp).clickable { onDelete(item) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
