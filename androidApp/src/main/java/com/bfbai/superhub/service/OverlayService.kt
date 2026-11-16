@@ -14,43 +14,58 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.ViewModelStore
+import com.bfbai.superhub.sync.ClipboardItem
 import com.bfbai.superhub.sync.SyncManager
 import kotlinx.coroutines.*
 
-class OverlayService : Service() {
+class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
 
     private lateinit var windowManager: WindowManager
-    private lateinit var mainView: LinearLayout
-    private lateinit var textView: TextView
     private lateinit var params: WindowManager.LayoutParams
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    
-    private var currentText = "" 
-    private var isExpanded = true // متغير عشان نعرف الستارة كبيرة ولا صغيرة
+    private var composeView: ComposeView? = null
+    private val lifecycleRegistry = androidx.lifecycle.LifecycleRegistry(this)
+    private val store = ViewModelStore()
+    private val savedStateRegistryController = androidx.savedstate.SavedStateRegistryController.create(this)
+
+    override val lifecycle: androidx.lifecycle.Lifecycle get() = lifecycleRegistry
+    override val viewModelStore: ViewModelStore get() = store
+    override val savedStateRegistry: androidx.savedstate.SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate() {
         super.onCreate()
+        lifecycleRegistry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+        savedStateRegistryController.performRestore(null)
+
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         showOverlay()
-        
-        scope.launch {
-            SyncManager.overlayEvents.collect { receivedText ->
-                currentText = receivedText
-                textView.text = "نص جاهز:\n$receivedText"
-                if (!isExpanded) {
-                    mainView.layoutParams = LinearLayout.LayoutParams(400, 400)
-                    isExpanded = true
-                    windowManager.updateViewLayout(mainView, params)
-                }
-            }
-        }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
     private fun showOverlay() {
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -68,36 +83,22 @@ class OverlayService : Service() {
         params.x = 50
         params.y = 100
 
-        mainView = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xFF0B1B3A.toInt())
-            setPadding(40, 40, 40, 40)
-            layoutParams = LinearLayout.LayoutParams(400, 400) 
-            gravity = Gravity.CENTER
-        }
-
-        textView = TextView(this).apply {
-            text = "SuperHub\n(ID: ${SyncManager.deviceId})"
-            setTextColor(0xFF4DE1E1.toInt())
-            textSize = 16f
-        }
-        
-        mainView.addView(textView)
-
-        // دالة التصغير والتكبير اللي كانت ناقصة
-        fun toggleSize() {
-            if (isExpanded) {
-                mainView.layoutParams = LinearLayout.LayoutParams(150, 150)
-                textView.text = "SH"
-            } else {
-                mainView.layoutParams = LinearLayout.LayoutParams(400, 400)
-                textView.text = if (currentText.isNotEmpty()) "نص جاهز:\n$currentText" else "SuperHub\n(ID: ${SyncManager.deviceId})"
+        composeView = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(this@OverlayService)
+            setViewTreeSavedStateRegistryOwner(this@OverlayService)
+            setViewTreeViewModelStoreOwner(this@OverlayService)
+            
+            setContent {
+                val history by SyncManager.clipboardHistory.collectAsState()
+                OverlayContent(
+                    history = history, 
+                    onDelete = { SyncManager.removeFromHistory(it) }, 
+                    deviceId = SyncManager.deviceId
+                )
             }
-            isExpanded = !isExpanded
-            windowManager.updateViewLayout(mainView, params)
         }
 
-        mainView.setOnTouchListener(object : View.OnTouchListener {
+        composeView?.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
@@ -121,21 +122,7 @@ class OverlayService : Service() {
                         
                         params.x = initialX + deltaX
                         params.y = initialY + deltaY
-                        windowManager.updateViewLayout(mainView, params)
-                        return true
-                    }
-                    MotionEvent.ACTION_UP -> {
-                        if (!isDragging) {
-                            // لو ضغطة سريعة، ننسخ النص لو موجود، لو مفيش نغير الحجم
-                            if (currentText.isNotEmpty()) {
-                                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("SuperHub", currentText)
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(this@OverlayService, "تم النسخ! تقدر تلصقه في أي مكان.", Toast.LENGTH_SHORT).show()
-                            } else {
-                                toggleSize()
-                            }
-                        }
+                        windowManager.updateViewLayout(composeView, params)
                         return true
                     }
                 }
@@ -143,16 +130,68 @@ class OverlayService : Service() {
             }
         })
 
-        windowManager.addView(mainView, params)
+        windowManager.addView(composeView, params)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::mainView.isInitialized) {
-            windowManager.removeView(mainView)
+        lifecycleRegistry.currentState = androidx.lifecycle.Lifecycle.State.DESTROYED
+        if (composeView != null) {
+            windowManager.removeView(composeView)
         }
-        scope.cancel()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun OverlayContent(history: List<ClipboardItem>, onDelete: (ClipboardItem) -> Unit, deviceId: String) {
+    Surface(
+        modifier = Modifier.width(300.dp).heightIn(max = 450.dp), // تحكم في حجم الستارة
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF0B1B3A),
+        shadowElevation = 12.dp
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("SuperHub (ID: $deviceId)", color = Color(0xFF4DE1E1), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            if (history.isEmpty()) {
+                Text("مفيش نصوص محفوظة لسه", color = Color.Gray, fontSize = 14.sp)
+            } else {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(history) { item ->
+                        SwipeToDismissBox(
+                            state = rememberSwipeToDismissBoxState(),
+                            backgroundContent = {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFFFF5A5F), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 20.dp), 
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "حذف", tint = Color.White)
+                                }
+                            },
+                            onDismiss = { onDelete(item) }
+                        ) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF13264D)),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(item.text, color = Color.White, fontSize = 14.sp)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(item.sourceApp, color = Color(0xFF4DE1E1), fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
