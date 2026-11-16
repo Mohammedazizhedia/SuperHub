@@ -35,9 +35,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     lastText = text
                     Log.d("ClipboardService", "Copied: $text")
                     
-                    // إضافة النص للرف والسجل
                     shelf?.add(text)
-                    SyncManager.addToHistory(text)
+                    SyncManager.addToHistory(text) // هنا بنبعت String
                 }
             }
         }
@@ -51,13 +50,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    // دالة الإدراج في خانة الكتابة المفتوحة
     private fun insertIntoFocused(text: String) {
         val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("shelf", text))
         
-        // نجرب ACTION_PASTE الأول، لو فشل نجرب ACTION_SET_TEXT
         val success = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
         if (!success) {
             val args = android.os.Bundle()
