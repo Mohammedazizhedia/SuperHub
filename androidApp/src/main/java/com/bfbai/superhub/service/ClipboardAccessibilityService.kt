@@ -18,15 +18,15 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        Log.d("ClipboardService", "Service Connected")
+        
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         
-        // تشغيل الرف الذكي
-        shelf = ShelfController(this) { text ->
-            insertIntoFocused(text)
+        if (shelf == null) {
+            shelf = ShelfController(this) { insertIntoFocused(it) }
+            shelf?.show()
         }
-        shelf?.show()
 
-        // مراقبة الحافظة
         clipboardManager.addPrimaryClipChangedListener {
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
@@ -35,31 +35,27 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     lastText = text
                     Log.d("ClipboardService", "Copied: $text")
                     
+                    SyncManager.addToHistory(text)
+                    SyncManager.broadcastToOverlay(text)
                     shelf?.add(text)
-                    SyncManager.addToHistory(text) // هنا بنبعت String
                 }
             }
         }
+    }
+
+    fun insertIntoFocused(text: String) {
+        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
+        clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
+        node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
 
     override fun onDestroy() {
+        Log.d("ClipboardService", "Service Destroyed")
         shelf?.hide()
+        shelf = null
         super.onDestroy()
-    }
-
-    private fun insertIntoFocused(text: String) {
-        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
-        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("shelf", text))
-        
-        val success = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-        if (!success) {
-            val args = android.os.Bundle()
-            args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-        }
     }
 }
