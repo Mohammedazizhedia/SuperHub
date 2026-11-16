@@ -28,7 +28,8 @@ class OverlayService : Service() {
     private lateinit var params: WindowManager.LayoutParams
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     
-    private var currentText = "" // هنا بنحفظ النص اللي جاي
+    private var currentText = "" 
+    private var isExpanded = true // متغير عشان نعرف الستارة كبيرة ولا صغيرة
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate() {
@@ -36,11 +37,15 @@ class OverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         showOverlay()
         
-        // الاستماع لأي نص جديد جاي من الحافظة
         scope.launch {
             SyncManager.overlayEvents.collect { receivedText ->
                 currentText = receivedText
-                textView.text = "Nسخني:\n$receivedText" // تغيير النص عشان يوضح إنه جاهز للنسخ
+                textView.text = "نص جاهز:\n$receivedText"
+                if (!isExpanded) {
+                    mainView.layoutParams = LinearLayout.LayoutParams(400, 400)
+                    isExpanded = true
+                    windowManager.updateViewLayout(mainView, params)
+                }
             }
         }
     }
@@ -79,7 +84,19 @@ class OverlayService : Service() {
         
         mainView.addView(textView)
 
-        // دالة السحب
+        // دالة التصغير والتكبير اللي كانت ناقصة
+        fun toggleSize() {
+            if (isExpanded) {
+                mainView.layoutParams = LinearLayout.LayoutParams(150, 150)
+                textView.text = "SH"
+            } else {
+                mainView.layoutParams = LinearLayout.LayoutParams(400, 400)
+                textView.text = if (currentText.isNotEmpty()) "نص جاهز:\n$currentText" else "SuperHub\n(ID: ${SyncManager.deviceId})"
+            }
+            isExpanded = !isExpanded
+            windowManager.updateViewLayout(mainView, params)
+        }
+
         mainView.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -109,14 +126,14 @@ class OverlayService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         if (!isDragging) {
-                            // لو ضغطة واحدة، ننسخ النص
+                            // لو ضغطة سريعة، ننسخ النص لو موجود، لو مفيش نغير الحجم
                             if (currentText.isNotEmpty()) {
                                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 val clip = ClipData.newPlainText("SuperHub", currentText)
                                 clipboard.setPrimaryClip(clip)
                                 Toast.makeText(this@OverlayService, "تم النسخ! تقدر تلصقه في أي مكان.", Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(this@OverlayService, "مفيش نص لسه، انسخ حاجة الأول.", Toast.LENGTH_SHORT).show()
+                                toggleSize()
                             }
                         }
                         return true
