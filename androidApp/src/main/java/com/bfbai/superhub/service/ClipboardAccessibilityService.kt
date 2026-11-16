@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import com.bfbai.superhub.sync.ClipboardItem
 import com.bfbai.superhub.sync.SyncManager
 
 class ClipboardAccessibilityService : AccessibilityService() {
@@ -25,10 +26,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     lastText = text
                     Log.d("ClipboardService", "Copied: $text")
                     
-                    // إرسال النص للسجل والستارة
-                    SyncManager.addToHistory(text)
-                    SyncManager.broadcastToOverlay(text)
-                    SyncManager.sendClipboard(text)
+                    // إنشاء عنصر جديد وإضافته للقائمة
+                    val newItem = ClipboardItem(text = text)
+                    SyncManager.addToHistory(newItem)
                 }
             }
         }
