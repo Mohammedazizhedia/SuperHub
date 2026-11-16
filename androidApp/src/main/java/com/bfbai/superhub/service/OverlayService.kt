@@ -16,13 +16,10 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -93,6 +90,12 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewM
                 OverlayContent(
                     history = history, 
                     onDelete = { SyncManager.removeFromHistory(it) }, 
+                    onCopy = { text ->
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = ClipData.newPlainText("SuperHub", text)
+                        clipboard.setPrimaryClip(clip)
+                        Toast.makeText(this@OverlayService, "تم النسخ!", Toast.LENGTH_SHORT).show()
+                    },
                     deviceId = SyncManager.deviceId
                 )
             }
@@ -144,11 +147,15 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner, ViewM
     override fun onBind(intent: Intent?): IBinder? = null
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OverlayContent(history: List<ClipboardItem>, onDelete: (ClipboardItem) -> Unit, deviceId: String) {
+fun OverlayContent(
+    history: List<ClipboardItem>, 
+    onDelete: (ClipboardItem) -> Unit, 
+    onCopy: (String) -> Unit,
+    deviceId: String
+) {
     Surface(
-        modifier = Modifier.width(300.dp).heightIn(max = 450.dp), // تحكم في حجم الستارة
+        modifier = Modifier.width(300.dp).heightIn(max = 450.dp),
         shape = RoundedCornerShape(16.dp),
         color = Color(0xFF0B1B3A),
         shadowElevation = 12.dp
@@ -162,30 +169,31 @@ fun OverlayContent(history: List<ClipboardItem>, onDelete: (ClipboardItem) -> Un
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(history) { item ->
-                        SwipeToDismissBox(
-                            state = rememberSwipeToDismissBoxState(),
-                            backgroundContent = {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color(0xFFFF5A5F), RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 20.dp), 
-                                    contentAlignment = Alignment.CenterEnd
-                                ) {
-                                    Icon(Icons.Default.Delete, contentDescription = "حذف", tint = Color.White)
-                                }
-                            },
-                            onDismiss = { onDelete(item) }
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp), // مساحة بين البطاقات
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF13264D)),
+                            shape = RoundedCornerShape(8.dp),
+                            onClick = { onCopy(item.text) } // كود النسخ لما تدوس
                         ) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF13264D)),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(12.dp)) {
-                                    Text(item.text, color = Color.White, fontSize = 14.sp)
-                                    Spacer(modifier = Modifier.height(4.dp))
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(item.text, color = Color.White, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(item.sourceApp, color = Color(0xFF4DE1E1), fontSize = 11.sp)
+                                    // زرار الحذف
+                                    Text(
+                                        text = "حذف",
+                                        color = Color(0xFFFF5A5F),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(4.dp).clickable { onDelete(item) }
+                                    )
                                 }
                             }
                         }
