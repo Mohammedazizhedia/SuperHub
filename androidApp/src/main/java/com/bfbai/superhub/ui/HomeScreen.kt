@@ -67,13 +67,13 @@ fun HomeScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            // زرار اختبار سريع
             Button(
                 onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     val clip = ClipData.newPlainText("SuperHub Test", "نص تجريبي للاختبار")
                     clipboard.setPrimaryClip(clip)
                     Toast.makeText(context, "تم نسخ نص تجريبي!", Toast.LENGTH_SHORT).show()
+                    viewModel.addSyncItem("نص تجريبي للاختبار")
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
