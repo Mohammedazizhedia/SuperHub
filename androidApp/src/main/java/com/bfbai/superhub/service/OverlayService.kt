@@ -16,6 +16,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -172,10 +173,10 @@ fun OverlayContent(
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp), // مساحة بين البطاقات
+                                .padding(vertical = 4.dp),
                             colors = CardDefaults.cardColors(containerColor = Color(0xFF13264D)),
                             shape = RoundedCornerShape(8.dp),
-                            onClick = { onCopy(item.text) } // كود النسخ لما تدوس
+                            onClick = { onCopy(item.text) }
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(item.text, color = Color.White, fontSize = 14.sp)
@@ -186,7 +187,6 @@ fun OverlayContent(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(item.sourceApp, color = Color(0xFF4DE1E1), fontSize = 11.sp)
-                                    // زرار الحذف
                                     Text(
                                         text = "حذف",
                                         color = Color(0xFFFF5A5F),
