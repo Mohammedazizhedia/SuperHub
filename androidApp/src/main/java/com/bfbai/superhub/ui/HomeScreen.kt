@@ -67,31 +67,31 @@ fun HomeScreen(
                 .padding(padding)
                 .padding(16.dp)
         ) {
-            Text("الأجهزة المتصلة", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            // زرار اختبار سريع
+            Button(
+                onClick = {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText("SuperHub Test", "نص تجريبي للاختبار")
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(context, "تم نسخ نص تجريبي!", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(12.dp).background(Color(0xFF2ECC71), RoundedCornerShape(50)))
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text("جهازي (هذا الهاتف)", fontWeight = FontWeight.Medium)
-                }
+                Text("اضغط هنا لنسخ نص تجريبي")
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
-            
+            Spacer(modifier = Modifier.height(16.dp))
+
             Text("آخر ما تمت مزامنته (اضغط للنسخ)", fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 8.dp))
             
             if (history.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("دوس على زرار + عشان تطلع الستارة.", color = Color.Gray)
+                    Text("دوس على الزرار اللي فوق عشان تنسخ نص وتشوفه هنا.", color = Color.Gray)
                 }
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(history) { item ->
                         SyncItemCard(item) {
-                            // زرار النسخ اللي كان ناقص
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             val clip = ClipData.newPlainText("SuperHub", item.text)
                             clipboard.setPrimaryClip(clip)
