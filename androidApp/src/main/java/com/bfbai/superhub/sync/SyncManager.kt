@@ -31,4 +31,10 @@ object SyncManager {
             Log.d(TAG, "Sent to overlay: $text")
         }
     }
+
+    // رجعنا الدالة دي عشان الخطأ يختفي
+    fun sendClipboard(text: String) {
+        Log.d(TAG, "Preparing to send to network: $text")
+        // المزامنة هنضيفها بعدين
+    }
 }
