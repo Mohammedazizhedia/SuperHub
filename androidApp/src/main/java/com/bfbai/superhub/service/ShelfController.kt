@@ -53,6 +53,7 @@ class ShelfController(
     private val list: LinearLayout = LinearLayout(ctx)
     private val scroll: ScrollView = ScrollView(ctx)
     private val root: FrameLayout = FrameLayout(ctx)
+    private val topBar: LinearLayout = LinearLayout(ctx) // شريط علوي ثابت
 
     private val lp: WindowManager.LayoutParams = WindowManager.LayoutParams(
         (AppConfig.SHELF_CLOSED_WIDTH_DP * dp).toInt(),
@@ -87,8 +88,35 @@ class ShelfController(
         list.setPadding(pad, pad, pad, pad)
         
         scroll.addView(list)
-        root.addView(scroll)
         scroll.visibility = View.GONE
+        
+        // تجهيز الشريط العلوي الثابت
+        topBar.orientation = LinearLayout.HORIZONTAL
+        topBar.setPadding(pad, pad, pad, 0)
+        topBar.layoutDirection = list.layoutDirection
+        
+        val title = TextView(ctx).apply {
+            text = "SuperHub"
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            setTypeface(null, Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        
+        val menuBtn = TextView(ctx).apply {
+            text = "⋮⋮"
+            setTextColor(AppConfig.SHELF_STROKE_COLOR)
+            textSize = 20f
+            setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
+            setOnClickListener { showProfessionalMenu(it) }
+        }
+        
+        topBar.addView(title)
+        topBar.addView(menuBtn)
+
+        // وضع الشريط العلوي والكروت جوه الـ root
+        root.addView(topBar)
+        root.addView(scroll)
         
         render()
 
@@ -129,9 +157,11 @@ class ShelfController(
                             if (lp.x + (lp.width / 2) > midPoint) {
                                 lp.gravity = Gravity.TOP or Gravity.END
                                 list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
+                                topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
                             } else {
                                 lp.gravity = Gravity.TOP or Gravity.START
                                 list.layoutDirection = View.LAYOUT_DIRECTION_LTR 
+                                topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
                             }
                             lp.x = 0 
                             if (added) wm.updateViewLayout(root, lp)
@@ -205,6 +235,11 @@ class ShelfController(
             lp.height = (AppConfig.SHELF_EXPANDED_HEIGHT_DP * dp).toInt()
             scroll.visibility = View.VISIBLE
             
+            // تظبيط ارتفاع الكروت عشان الشريط العلوي ياخد مساحته
+            val params = scroll.layoutParams as FrameLayout.LayoutParams
+            params.topMargin = (40 * dp).toInt() // مساحة للشريط العلوي
+            scroll.layoutParams = params
+
             autoCloseHandler.removeCallbacks(autoCloseRunnable)
             autoCloseHandler.postDelayed(autoCloseRunnable, AppConfig.AUTO_CLOSE_DELAY_MS)
         } else {
@@ -218,33 +253,6 @@ class ShelfController(
 
     private fun render() {
         list.removeAllViews()
-        
-        val topBar = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, 0, (10 * dp).toInt())
-            layoutDirection = list.layoutDirection 
-        }
-        
-        val title = TextView(ctx).apply {
-            text = "SuperHub"
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            setTypeface(null, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        
-        val menuBtn = TextView(ctx).apply {
-            text = "⋮⋮"
-            setTextColor(AppConfig.SHELF_STROKE_COLOR)
-            textSize = 20f
-            setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
-            setOnClickListener { showProfessionalMenu(it) }
-        }
-        
-        topBar.addView(title)
-        topBar.addView(menuBtn)
-        list.addView(topBar)
-
         if (items.isEmpty()) {
             list.addView(TextView(ctx).apply {
                 text = "الرف فاضي..."
@@ -280,7 +288,6 @@ class ShelfController(
         }
         
         popup.setAdapter(adapter)
-        popup.setDividerDrawable(ColorDrawable(AppConfig.MENU_DIVIDER_COLOR))
         
         popup.setOnItemClickListener { _, _, position, _ ->
             when (position) {
@@ -337,16 +344,13 @@ class ShelfController(
         tvSource.layoutDirection = View.LAYOUT_DIRECTION_LOCALE
         card.addView(tvSource)
 
-        // --- إضافة خاصية السحب للحذف (Swipe to Dismiss) ---
         val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null) return false
                 val diffX = e2.x - e1.x
-                // لو السحب أفقياً وكان سريع كفاية
                 if (abs(diffX) > 100 && abs(velocityX) > 100) {
-                    // حذف العنصر من المصفوفة
                     items.remove(item)
-                    render() // إعادة رسم الرف
+                    render()
                     return true
                 }
                 return false
@@ -355,7 +359,7 @@ class ShelfController(
 
         card.setOnTouchListener { v, event ->
             gestureDetector.onTouchEvent(event)
-            false // نرجع false عشان الكليك العادي يشتغل برضه
+            false 
         }
         
         card.setOnClickListener { 
