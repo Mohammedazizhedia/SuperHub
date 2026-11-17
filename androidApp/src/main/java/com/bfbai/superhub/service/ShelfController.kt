@@ -19,67 +19,57 @@ import android.widget.ScrollView
 import android.widget.TextView
 import kotlin.math.abs
 
-class ShelfItem(
-    val text: String,
-    val sourceApp: String,
-    val color: Int
-)
+data class ShelfItem(val text: String, val source: String, val color: Int)
 
+// نقلنا SuppressLint هنا لضمان عدم حدوث أخطاء
+@SuppressLint("ClickableViewAccessibility")
 class ShelfController(
     private val ctx: Context,
     private val onInsert: (String) -> Unit
 ) {
-    private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-    private val dp = ctx.resources.displayMetrics.density
-    private val items = ArrayList<ShelfItem>()
-    private var expanded = false
-    private var added = false
-    private lateinit var lp: WindowManager.LayoutParams
+    private val wm: WindowManager = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    private val dp: Float = ctx.resources.displayMetrics.density
+    private val items: ArrayList<ShelfItem> = ArrayList()
+    private var expanded: Boolean = false
+    private var added: Boolean = false
 
-    private val list = LinearLayout(ctx).apply { 
-        orientation = LinearLayout.VERTICAL
-        setPadding((12 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt())
-    }
-    
-    @SuppressLint("ClickableViewAccessibility")
-    private val root = FrameLayout(ctx).apply {
+    private val list: LinearLayout = LinearLayout(ctx)
+    private val scroll: ScrollView = ScrollView(ctx)
+    private val root: FrameLayout = FrameLayout(ctx)
+
+    private val lp: WindowManager.LayoutParams = WindowManager.LayoutParams(
+        (24 * dp).toInt(),
+        (160 * dp).toInt(),
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT
+    )
+
+    init {
+        lp.gravity = Gravity.TOP or Gravity.END
+        lp.x = 0
+        lp.y = 400
+
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             setColor(Color.parseColor("#E60B1B3A"))
             cornerRadii = floatArrayOf((16 * dp), (16 * dp), 0f, 0f, 0f, 0f, (16 * dp), (16 * dp))
         }
-        background = bg
+        root.background = bg
         
-        addView(ScrollView(ctx).apply { addView(list) })
+        list.orientation = LinearLayout.VERTICAL
+        val pad = (12 * dp).toInt()
+        list.setPadding(pad, pad, pad, pad)
         
-        // 1. إعدادات السحب والإفلات
-        setOnDragListener(object : View.OnDragListener {
-            override fun onDrag(v: View?, event: DragEvent?): Boolean {
-                if (event == null) return false
-                when (event.action) {
-                    DragEvent.ACTION_DRAG_STARTED -> { 
-                        setExpanded(true)
-                        return true 
-                    }
-                    DragEvent.ACTION_DROP -> {
-                        event.clipData?.let { cd ->
-                            for (i in 0 until cd.itemCount) {
-                                val text = cd.getItemAt(i).coerceToText(ctx)?.toString()
-                                if (text != null) add(text, "سحب")
-                            }
-                        }
-                        return true
-                    }
-                    DragEvent.ACTION_DRAG_ENDED -> { 
-                        return true 
-                    }
-                }
-                return true
-            }
-        })
+        scroll.addView(list)
+        root.addView(scroll)
+        
+        // إخفاء الـ ScrollView وهو مطوي عشان مياكلش اللمسة
+        scroll.visibility = View.GONE
 
-        // 2. إعدادات تحريك الرف (Touch)
-        setOnTouchListener(object : View.OnTouchListener {
+        // كود سحب الرف نفسه (رأسي فقط)
+        root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
@@ -102,118 +92,149 @@ class ShelfController(
                         val deltaY = (event.rawY - initialTouchY).toInt()
                         if (abs(deltaX) > 10 || abs(deltaY) > 10) isDragging = true
                         
-                        lp.x = initialX + deltaX
+                        // سحب رأسي فقط
                         lp.y = initialY + deltaY
                         if (added) wm.updateViewLayout(root, lp)
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!isDragging) setExpanded(!expanded)
+                        if (!isDragging) {
+                            setExpanded(!expanded)
+                        }
                         return true
                     }
                 }
                 return false
             }
         })
-    }
 
-    init {
-        lp = WindowManager.LayoutParams(
-            (20 * dp).toInt(), (140 * dp).toInt(),
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        ).apply { 
-            gravity = Gravity.TOP or Gravity.END
-            x = 0
-            y = 400 
+        root.setOnDragListener { _, e ->
+            handleDrag(e)
         }
     }
 
-    fun show() { if (!added) { wm.addView(root, lp); added = true } }
-    fun hide() { if (added) { wm.removeView(root); added = false } }
+    private fun handleDrag(e: DragEvent): Boolean {
+        when (e.action) {
+            DragEvent.ACTION_DRAG_STARTED -> {
+                setExpanded(true)
+            }
+            DragEvent.ACTION_DROP -> {
+                val cd: ClipData? = e.clipData
+                if (cd != null) {
+                    for (i in 0 until cd.itemCount) {
+                        val s: String? = cd.getItemAt(i).coerceToText(ctx)?.toString()
+                        if (s != null) add(s, "سحب")
+                    }
+                }
+            }
+            DragEvent.ACTION_DRAG_ENDED -> {
+                // إغلاق الرف بعد الإفلات (حسب طلبك)
+                setExpanded(false)
+            }
+        }
+        return true
+    }
+
+    fun show() {
+        if (!added) {
+            wm.addView(root, lp)
+            added = true
+        }
+    }
+
+    fun hide() {
+        if (added) {
+            wm.removeView(root)
+            added = false
+        }
+    }
 
     fun add(text: String, source: String = "تطبيق") {
-        val t = text.trim()
+        val t: String = text.trim()
         if (t.isEmpty()) return
-        if (items.none { it.text == t }) {
-            val color = when(source.lowercase()) {
-                "whatsapp", "واتساب" -> Color.parseColor("#1E3B2C")
-                "chrome", "كروم" -> Color.parseColor("#2C1E3B")
-                else -> Color.parseColor("#13264D")
-            }
-            items.add(0, ShelfItem(t, source, color))
-            while (items.size > 30) items.removeAt(items.lastIndex)
-            render()
+        
+        // لو النص موجود بالفعل، بنشيله عشان نضيفه فوق بلونه الجديد
+        items.removeAll { it.text == t }
+        
+        val cardColor = when(source.lowercase()) {
+            "whatsapp", "واتساب" -> Color.parseColor("#1E3B2C")
+            "chrome", "كروم" -> Color.parseColor("#2C1E3B")
+            else -> Color.parseColor("#13264D")
         }
+        
+        items.add(0, ShelfItem(t, source, cardColor))
+        while (items.size > 30) items.removeAt(items.size - 1)
+        render()
     }
 
-    fun setExpanded(on: Boolean) {
+    private fun setExpanded(on: Boolean) {
         expanded = on
-        lp.width = if (on) (260 * dp).toInt() else (20 * dp).toInt()
-        lp.height = if (on) (350 * dp).toInt() else (140 * dp).toInt()
-        list.visibility = if (on) View.VISIBLE else View.INVISIBLE
+        lp.width = if (on) (260 * dp).toInt() else (24 * dp).toInt()
+        lp.height = if (on) (350 * dp).toInt() else (160 * dp).toInt()
+        
+        // التعديل المهم: استخدام GONE بدل INVISIBLE
+        scroll.visibility = if (on) View.VISIBLE else View.GONE
+        
         if (added) wm.updateViewLayout(root, lp)
     }
 
     private fun render() {
         list.removeAllViews()
-        items.forEach { item ->
-            val card = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding((14 * dp).toInt(), (14 * dp).toInt(), (14 * dp).toInt(), (14 * dp).toInt())
-                
-                val cardBg = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    setColor(item.color)
-                    cornerRadius = (12 * dp)
-                    setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1"))
-                }
-                background = cardBg
-                
-                val params = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                params.setMargins(0, 0, 0, (10 * dp).toInt())
-                layoutParams = params
-
-                addView(TextView(ctx).apply {
-                    this.text = item.text
-                    maxLines = 3
-                    setTextColor(Color.WHITE)
-                    textSize = 14f
-                    setTypeface(null, Typeface.BOLD)
-                })
-
-                addView(TextView(ctx).apply {
-                    this.text = "من: ${item.sourceApp}"
-                    setTextColor(Color.parseColor("#4DE1E1"))
-                    textSize = 11f
-                    setPadding(0, (4 * dp).toInt(), 0, 0)
-                })
-                
-                setOnClickListener(object : View.OnClickListener {
-                    override fun onClick(v: View?) {
-                        onInsert(item.text)
-                        setExpanded(false)
-                    }
-                })
-                
-                setOnLongClickListener(object : View.OnLongClickListener {
-                    override fun onLongClick(v: View?): Boolean {
-                        if (v != null) {
-                            v.startDragAndDrop(
-                                ClipData.newPlainText("shelf", item.text),
-                                View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL
-                            )
-                        }
-                        return true
-                    }
-                })
-            }
-            list.addView(card)
+        for (item in items) {
+            list.addView(buildItem(item))
         }
+    }
+
+    private fun buildItem(item: ShelfItem): LinearLayout {
+        val card = LinearLayout(ctx)
+        card.orientation = LinearLayout.VERTICAL
+        val pad = (14 * dp).toInt()
+        card.setPadding(pad, pad, pad, pad)
+        
+        val cardBg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(item.color)
+            cornerRadius = (12 * dp)
+            setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1"))
+        }
+        card.background = cardBg
+        
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        params.setMargins(0, 0, 0, (10 * dp).toInt())
+        card.layoutParams = params
+
+        val tvText = TextView(ctx)
+        tvText.text = item.text
+        tvText.maxLines = 3
+        tvText.setTextColor(Color.WHITE)
+        tvText.textSize = 14f
+        tvText.setTypeface(null, Typeface.BOLD)
+        card.addView(tvText)
+
+        val tvSource = TextView(ctx)
+        tvSource.text = "من: ${item.source}"
+        tvSource.setTextColor(Color.parseColor("#4DE1E1"))
+        tvSource.textSize = 11f
+        tvSource.setPadding(0, (4 * dp).toInt(), 0, 0)
+        card.addView(tvSource)
+        
+        card.setOnClickListener { 
+            onInsert(item.text)
+            setExpanded(false)
+        }
+        
+        card.setOnLongClickListener { v: View ->
+            val clip: ClipData = ClipData.newPlainText("shelf", item.text)
+            v.startDragAndDrop(
+                clip,
+                View.DragShadowBuilder(v),
+                null,
+                View.DRAG_FLAG_GLOBAL
+            )
+        }
+        return card
     }
 }
