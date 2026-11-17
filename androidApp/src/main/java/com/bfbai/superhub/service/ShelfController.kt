@@ -21,7 +21,6 @@ import kotlin.math.abs
 
 data class ShelfItem(val text: String, val source: String, val color: Int)
 
-// نقلنا SuppressLint هنا لضمان عدم حدوث أخطاء
 @SuppressLint("ClickableViewAccessibility")
 class ShelfController(
     private val ctx: Context,
@@ -42,7 +41,8 @@ class ShelfController(
         (160 * dp).toInt(),
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
         PixelFormat.TRANSLUCENT
     )
 
@@ -62,15 +62,12 @@ class ShelfController(
         val pad = (12 * dp).toInt()
         list.setPadding(pad, pad, pad, pad)
         
+        // إعداد الـ ScrollView
         scroll.addView(list)
         root.addView(scroll)
-        
-        // إخفاء الـ ScrollView وهو مطوي عشان مياكلش اللمسة
         scroll.visibility = View.GONE
 
-        // كود سحب الرف نفسه (رأسي فقط)
         root.setOnTouchListener(object : View.OnTouchListener {
-            private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
             private var initialTouchY = 0f
@@ -80,7 +77,6 @@ class ShelfController(
                 if (event == null) return false
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
-                        initialX = lp.x
                         initialY = lp.y
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
@@ -92,15 +88,16 @@ class ShelfController(
                         val deltaY = (event.rawY - initialTouchY).toInt()
                         if (abs(deltaX) > 10 || abs(deltaY) > 10) isDragging = true
                         
-                        // سحب رأسي فقط
                         lp.y = initialY + deltaY
                         if (added) wm.updateViewLayout(root, lp)
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!isDragging) {
-                            setExpanded(!expanded)
-                        }
+                        if (!isDragging) setExpanded(!expanded)
+                        return true
+                    }
+                    MotionEvent.ACTION_OUTSIDE -> {
+                        if (expanded) setExpanded(false)
                         return true
                     }
                 }
@@ -108,78 +105,64 @@ class ShelfController(
             }
         })
 
-        root.setOnDragListener { _, e ->
-            handleDrag(e)
-        }
+        root.setOnDragListener { _, e -> handleDrag(e) }
     }
 
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
-            DragEvent.ACTION_DRAG_STARTED -> {
-                setExpanded(true)
-            }
+            DragEvent.ACTION_DRAG_STARTED -> setExpanded(true)
             DragEvent.ACTION_DROP -> {
-                val cd: ClipData? = e.clipData
-                if (cd != null) {
+                e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        val s: String? = cd.getItemAt(i).coerceToText(ctx)?.toString()
-                        if (s != null) add(s, "سحب")
+                        cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { add(it, "سحب") }
                     }
                 }
             }
-            DragEvent.ACTION_DRAG_ENDED -> {
-                // إغلاق الرف بعد الإفلات (حسب طلبك)
-                setExpanded(false)
-            }
+            DragEvent.ACTION_DRAG_ENDED -> setExpanded(false)
         }
         return true
     }
 
     fun show() {
-        if (!added) {
-            wm.addView(root, lp)
-            added = true
-        }
+        if (!added) { wm.addView(root, lp); added = true }
     }
 
     fun hide() {
-        if (added) {
-            wm.removeView(root)
-            added = false
-        }
+        if (added) { wm.removeView(root); added = false }
     }
 
+    // الدالة دي بقت بتحفظ في السجل كمان
     fun add(text: String, source: String = "تطبيق") {
         val t: String = text.trim()
         if (t.isEmpty()) return
         
-        // لو النص موجود بالفعل، بنشيله عشان نضيفه فوق بلونه الجديد
         items.removeAll { it.text == t }
         
         val cardColor = when(source.lowercase()) {
-            "whatsapp", "واتساب" -> Color.parseColor("#1E3B2C")
-            "chrome", "كروم" -> Color.parseColor("#2C1E3B")
-            else -> Color.parseColor("#13264D")
+            "whatsapp", "واتساب" -> Color.parseColor("#991E3B2C")
+            "chrome", "كروم" -> Color.parseColor("#992C1E3B")
+            else -> Color.parseColor("#9913264D")
         }
         
         items.add(0, ShelfItem(t, source, cardColor))
+        // مسحنا شرط الـ 3، وخليتها 30
         while (items.size > 30) items.removeAt(items.size - 1)
         render()
     }
 
-    private fun setExpanded(on: Boolean) {
+    fun setExpanded(on: Boolean) {
         expanded = on
         lp.width = if (on) (260 * dp).toInt() else (24 * dp).toInt()
         lp.height = if (on) (350 * dp).toInt() else (160 * dp).toInt()
-        
-        // التعديل المهم: استخدام GONE بدل INVISIBLE
         scroll.visibility = if (on) View.VISIBLE else View.GONE
-        
         if (added) wm.updateViewLayout(root, lp)
     }
 
     private fun render() {
         list.removeAllViews()
+        
+        // شيلنا زرار الإغلاق (X) من هنا خلاص
+
         for (item in items) {
             list.addView(buildItem(item))
         }
@@ -195,7 +178,7 @@ class ShelfController(
             shape = GradientDrawable.RECTANGLE
             setColor(item.color)
             cornerRadius = (12 * dp)
-            setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1"))
+            setStroke((1 * dp).toInt(), Color.parseColor("#554DE1E1"))
         }
         card.background = cardBg
         
