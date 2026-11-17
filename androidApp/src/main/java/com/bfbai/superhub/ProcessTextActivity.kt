@@ -2,6 +2,9 @@
 package com.bfbai.superhub
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -14,8 +17,8 @@ class ProcessTextActivity : Activity() {
             val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
             if (!text.isNullOrEmpty()) {
                 // نسخ النص للحافظة عشان الرف يلتقطه
-                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val clip = android.content.ClipData.newPlainText("shelf", text)
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = ClipData.newPlainText("shelf", text)
                 clipboard.setPrimaryClip(clip)
                 Toast.makeText(this, "تم النسخ إلى SuperHub", Toast.LENGTH_SHORT).show()
             }
