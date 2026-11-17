@@ -111,7 +111,7 @@ class ShelfController(
         
         render()
 
-        // --- إضافة خاصية الضغط المطول للاختفاء والتفتيت ---
+        // --- خاصية الضغط المطول للاختفاء والتفيت ---
         root.setOnLongClickListener {
             animateDisappear()
             true
@@ -188,7 +188,6 @@ class ShelfController(
         root.setOnDragListener { _, e -> handleDrag(e) }
     }
 
-    // دالة الأنيميشن (التفتيت والاختفاء)
     private fun animateDisappear() {
         val anim = ValueAnimator.ofFloat(1f, 0f)
         anim.duration = 400
@@ -208,7 +207,6 @@ class ShelfController(
         anim.start()
     }
 
-    // عكس الحواف (المرايا)
     private fun updateBackground() {
         val radius = AppConfig.SHELF_CORNER_RADIUS_DP * dp
         val bg = GradientDrawable().apply {
@@ -318,12 +316,13 @@ class ShelfController(
         if (customMenu == null) {
             customMenu = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(AppConfig.MENU_BG_COLOR) // اللون الزجاجي الجديد
+                setBackgroundColor(AppConfig.MENU_BG_COLOR) 
                 val pad = (10 * dp).toInt()
                 setPadding(pad, pad, pad, pad)
                 y = (50 * dp) 
+                // تصغير عرض القائمة لـ 150 بدل 180
                 layoutParams = FrameLayout.LayoutParams(
-                    (180 * dp).toInt(),
+                    (150 * dp).toInt(),
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 )
             }
