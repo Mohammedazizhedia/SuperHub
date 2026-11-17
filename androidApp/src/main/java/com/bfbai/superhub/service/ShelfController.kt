@@ -52,11 +52,15 @@ class ShelfController(
         
         addView(ScrollView(ctx).apply { addView(list) })
         
+        // 1. إعدادات السحب والإفلات
         setOnDragListener(object : View.OnDragListener {
             override fun onDrag(v: View?, event: DragEvent?): Boolean {
                 if (event == null) return false
                 when (event.action) {
-                    DragEvent.ACTION_DRAG_STARTED -> { setExpanded(true); return true }
+                    DragEvent.ACTION_DRAG_STARTED -> { 
+                        setExpanded(true)
+                        return true 
+                    }
                     DragEvent.ACTION_DROP -> {
                         event.clipData?.let { cd ->
                             for (i in 0 until cd.itemCount) {
@@ -66,12 +70,15 @@ class ShelfController(
                         }
                         return true
                     }
-                    DragEvent.ACTION_DRAG_ENDED -> { return true }
+                    DragEvent.ACTION_DRAG_ENDED -> { 
+                        return true 
+                    }
                 }
                 return true
             }
         })
 
+        // 2. إعدادات تحريك الرف (Touch)
         setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -187,18 +194,24 @@ class ShelfController(
                     setPadding(0, (4 * dp).toInt(), 0, 0)
                 })
                 
-                setOnClickListener { 
-                    onInsert(item.text)
-                    setExpanded(false)
-                }
+                setOnClickListener(object : View.OnClickListener {
+                    override fun onClick(v: View?) {
+                        onInsert(item.text)
+                        setExpanded(false)
+                    }
+                })
                 
-                setOnLongClickListener { v ->
-                    v.startDragAndDrop(
-                        ClipData.newPlainText("shelf", item.text),
-                        View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL
-                    )
-                    true
-                }
+                setOnLongClickListener(object : View.OnLongClickListener {
+                    override fun onLongClick(v: View?): Boolean {
+                        if (v != null) {
+                            v.startDragAndDrop(
+                                ClipData.newPlainText("shelf", item.text),
+                                View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL
+                            )
+                        }
+                        return true
+                    }
+                })
             }
             list.addView(card)
         }
