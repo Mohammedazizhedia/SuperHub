@@ -9,7 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import com.bfbai.superhub.AppConfig
+import com.bfbai.superhub.sync.SyncManager
 
 class ClipboardAccessibilityService : AccessibilityService() {
 
@@ -20,8 +20,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        Log.d("ClipboardService", "Service Connected")
+        
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         
+        // تشغيل الرف العائم
         if (shelf == null) {
             shelf = ShelfController(this) { insertIntoFocused(it) }
             shelf?.show()
@@ -29,12 +32,16 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         
+        // مراقبة الحافظة (النسخ العادي)
         val l = ClipboardManager.OnPrimaryClipChangedListener {
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
                 val text = clip.getItemAt(0).text?.toString()
                 if (!text.isNullOrEmpty() && text != lastText) {
                     lastText = text
+                    Log.d("ClipboardService", "Copied: $text")
+                    
+                    // إضافة النص للرف مع اسم التطبيق
                     shelf?.add(text, getAppName())
                 }
             }
@@ -43,14 +50,17 @@ class ClipboardAccessibilityService : AccessibilityService() {
         clipboardManager.addPrimaryClipChangedListener(l)
     }
 
+    // دالة لمعرفة اسم التطبيق اللي بنسخ منه
     private fun getAppName(): String {
         val packageName: String? = rootInActiveWindow?.packageName?.toString()
         if (packageName == null || packageName == "com.bfbai.superhub") {
-            return AppConfig.defaultSource
+            return "تطبيق"
         }
+        // بنجيب آخر جزء من اسم الباكدج ونكبر أول حرف (مثلاً whatsapp -> Whatsapp)
         return packageName.split(".").last().replaceFirstChar { it.uppercase() }
     }
 
+    // دالة اللصق (لما تدوس على الكارت في الرف)
     fun insertIntoFocused(text: String) {
         val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
         lastText = text 
@@ -70,11 +80,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    
     override fun onInterrupt() {}
 
     override fun onDestroy() {
+        Log.d("ClipboardService", "Service Destroyed")
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         clipListener = null
+        
         shelf?.hide()
         shelf = null
         super.onDestroy()
