@@ -18,20 +18,22 @@ class MainViewModel : ViewModel() {
     val history: StateFlow<List<SyncItem>> = _history
 
     init {
+        // ربط القائمة الجديدة (clipboardHistory) بالسجل
         viewModelScope.launch {
-            SyncManager.historyEvents.collect { text ->
-                addSyncItem(text)
+            SyncManager.clipboardHistory.collect { items ->
+                val syncItems = items.map { 
+                    SyncItem(
+                        id = it.timestamp.toString(),
+                        text = it.text,
+                        time = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(it.timestamp))
+                    )
+                }
+                _history.value = syncItems
             }
         }
     }
 
     fun addSyncItem(text: String) {
-        val currentTime = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
-        val newItem = SyncItem(
-            id = System.currentTimeMillis().toString(), 
-            text = text, 
-            time = currentTime
-        )
-        _history.value = listOf(newItem) + _history.value
+        SyncManager.addToHistory(text)
     }
 }
