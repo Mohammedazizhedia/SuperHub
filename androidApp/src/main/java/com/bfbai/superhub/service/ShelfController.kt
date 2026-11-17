@@ -78,8 +78,10 @@ class ShelfController(
         }
         root.background = bg
         
+        // تظبيط الاتجاه للمرايا
+        list.layoutDirection = View.LAYOUT_DIRECTION_RTL
         list.orientation = LinearLayout.VERTICAL
-        val pad = (12 * dp).toInt()
+        val pad = (10 * dp).toInt()
         list.setPadding(pad, pad, pad, pad)
         
         scroll.addView(list)
@@ -124,10 +126,12 @@ class ShelfController(
                             
                             if (lp.x + (lp.width / 2) > midPoint) {
                                 lp.gravity = Gravity.TOP or Gravity.END
+                                list.layoutDirection = View.LAYOUT_DIRECTION_RTL // لو يمين، يبقى المرايا شمال
                             } else {
                                 lp.gravity = Gravity.TOP or Gravity.START
+                                list.layoutDirection = View.LAYOUT_DIRECTION_LTR // لو شمال، يبقى المرايا يمين
                             }
-                            lp.x = 0 // تصفير الإحداثي عشان يلزق في الحافة الجديدة صح
+                            lp.x = 0 
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
                             if (!expanded) setExpanded(true)
@@ -173,7 +177,6 @@ class ShelfController(
         if (added) { wm.removeView(root); added = false }
     }
 
-    // الدالة دي عشان زرار الكونترول بانل يقدر يتحكم في الرف
     fun toggleVisibility() {
         if (expanded) {
             setExpanded(false)
@@ -188,10 +191,6 @@ class ShelfController(
         
         items.removeAll { it.text == t }
         items.add(0, ShelfItem(t, source))
-        
-        if (AppConfig.MAX_HISTORY_ITEMS > 0) {
-            while (items.size > AppConfig.MAX_HISTORY_ITEMS) items.removeAt(items.size - 1)
-        }
         
         render()
         setExpanded(true) 
@@ -221,6 +220,8 @@ class ShelfController(
         val topBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, (10 * dp).toInt())
+            // عشان المرايا تظبط في الشريط العلوي
+            layoutDirection = list.layoutDirection 
         }
         
         val title = TextView(ctx).apply {
@@ -256,6 +257,7 @@ class ShelfController(
         }
     }
 
+    // تعديل القائمة عشان تفتح في الاتجاه الصح (مرايا)
     private fun showMenu(v: View) {
         val popup = PopupMenu(ctx, v)
         popup.menu.add(0, 1, 1, "Select")
@@ -280,6 +282,8 @@ class ShelfController(
         card.orientation = LinearLayout.VERTICAL
         val pad = (12 * dp).toInt()
         card.setPadding(pad, pad, pad, pad)
+        // تظبيط المرايا للكارت
+        card.layoutDirection = list.layoutDirection 
         
         val cardBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
@@ -289,7 +293,6 @@ class ShelfController(
         }
         card.background = cardBg
         
-        // ضبط أبعاد الكارت عشان يبقى متناسق
         val params = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -302,6 +305,8 @@ class ShelfController(
         tvText.maxLines = 3
         tvText.setTextColor(AppConfig.CARD_TEXT_COLOR)
         tvText.textSize = 14f
+        // النص يفضل في اتجاهه الطبيعي عشان ميتعكسش
+        tvText.layoutDirection = View.LAYOUT_DIRECTION_LOCALE 
         card.addView(tvText)
 
         val dateFormat = SimpleDateFormat("hh:mm a - dd MMM", Locale.getDefault())
@@ -312,6 +317,7 @@ class ShelfController(
         tvSource.setTextColor(AppConfig.CARD_SUBTEXT_COLOR)
         tvSource.textSize = 11f
         tvSource.setPadding(0, (4 * dp).toInt(), 0, 0)
+        tvSource.layoutDirection = View.LAYOUT_DIRECTION_LOCALE
         card.addView(tvSource)
         
         card.setOnClickListener { 
