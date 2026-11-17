@@ -52,23 +52,26 @@ class ShelfController(
         
         addView(ScrollView(ctx).apply { addView(list) })
         
-        // إعدادات السحب والإفلات
-        setOnDragListener { _, e ->
-            when (e.action) {
-                DragEvent.ACTION_DRAG_STARTED -> { setExpanded(true); true }
-                DragEvent.ACTION_DROP -> {
-                    e.clipData?.let { cd ->
-                        for (i in 0 until cd.itemCount)
-                            cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { add(it, "سحب") }
+        setOnDragListener(object : View.OnDragListener {
+            override fun onDrag(v: View?, event: DragEvent?): Boolean {
+                if (event == null) return false
+                when (event.action) {
+                    DragEvent.ACTION_DRAG_STARTED -> { setExpanded(true); return true }
+                    DragEvent.ACTION_DROP -> {
+                        event.clipData?.let { cd ->
+                            for (i in 0 until cd.itemCount) {
+                                val text = cd.getItemAt(i).coerceToText(ctx)?.toString()
+                                if (text != null) add(text, "سحب")
+                            }
+                        }
+                        return true
                     }
-                    true
+                    DragEvent.ACTION_DRAG_ENDED -> { return true }
                 }
-                DragEvent.ACTION_DRAG_ENDED -> { true }
-                else -> true
+                return true
             }
-        }
+        })
 
-        // إعدادات تحريك الرف
         setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -77,7 +80,8 @@ class ShelfController(
             private var isDragging = false
 
             override fun onTouch(v: View?, event: MotionEvent?): Boolean {
-                when (event?.action) {
+                if (event == null) return false
+                when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         initialX = lp.x
                         initialY = lp.y
