@@ -3,26 +3,27 @@ package com.bfbai.superhub.service
 
 import android.annotation.SuppressLint
 import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
+import com.bfbai.superhub.AppConfig
 import kotlin.math.abs
 
-data class ShelfItem(val content: String, val isImage: Boolean, val source: String, val color: Int)
+data class ShelfItem(val text: String, val source: String)
 
 @SuppressLint("ClickableViewAccessibility")
 class ShelfController(
@@ -35,31 +36,35 @@ class ShelfController(
     private var expanded: Boolean = false
     private var added: Boolean = false
 
-    private var lastOutsideTapTime: Long = 0
-    private val doubleTapTimeout: Long = 300
+    // القفل التلقائي
+    private val autoCloseHandler = Handler(Looper.getMainLooper())
+    private val autoCloseRunnable = Runnable { setExpanded(false) }
 
     private val list: LinearLayout = LinearLayout(ctx)
     private val scroll: ScrollView = ScrollView(ctx)
     private val root: FrameLayout = FrameLayout(ctx)
-
-    private val lp: WindowManager.LayoutParams = WindowManager.LayoutParams(
-        (24 * dp).toInt(),
-        (160 * dp).toInt(),
-        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-        PixelFormat.TRANSLUCENT
-    )
+    private lateinit var topBar: LinearLayout
+    private lateinit var lp: WindowManager.LayoutParams
 
     init {
-        lp.gravity = Gravity.TOP or Gravity.END // يبدأ على اليمين
-        lp.x = 0
-        lp.y = 400
+        lp = WindowManager.LayoutParams(
+            (AppConfig.shelfClosedWidth * dp).toInt(),
+            (AppConfig.shelfClosedHeight * dp).toInt(),
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.END
+            x = 0
+            y = 400
+        }
 
+        // خلفية الستارة
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor("#E60B1B3A")) 
+            setColor(Color.parseColor(AppConfig.shelfBackgroundColor))
             cornerRadii = floatArrayOf((16 * dp), (16 * dp), 0f, 0f, 0f, 0f, (16 * dp), (16 * dp))
         }
         root.background = bg
@@ -74,6 +79,10 @@ class ShelfController(
         
         render()
 
+        // شريط التحكم (الأزرار)
+        setupTopBar()
+
+        // السحب والتحكم
         root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -90,6 +99,7 @@ class ShelfController(
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
                         isDragging = false
+                        autoCloseHandler.removeCallbacks(autoCloseRunnable)
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
@@ -97,7 +107,6 @@ class ShelfController(
                         val deltaY = (event.rawY - initialTouchY).toInt()
                         if (abs(deltaX) > 10 || abs(deltaY) > 10) isDragging = true
                         
-                        // سحب في كل الاتجاهات
                         lp.x = initialX + deltaX
                         lp.y = (initialY + deltaY).coerceIn(0, ctx.resources.displayMetrics.heightPixels - lp.height)
                         if (added) wm.updateViewLayout(root, lp)
@@ -105,18 +114,16 @@ class ShelfController(
                     }
                     MotionEvent.ACTION_UP -> {
                         if (isDragging) {
-                            // خاصية الالتصاق (Snap to Edge)
+                            // الالتصاق بالحافة
                             val screenWidth = ctx.resources.displayMetrics.widthPixels
                             val midPoint = screenWidth / 2
                             
-                            // لو الرف في نص الشاشة اليمين، يروح اليمين. غير كده يروح الشمال
                             if (lp.x + (lp.width / 2) > midPoint) {
                                 lp.gravity = Gravity.TOP or Gravity.END
-                                lp.x = 0
                             } else {
                                 lp.gravity = Gravity.TOP or Gravity.START
-                                lp.x = 0
                             }
+                            lp.x = 0
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
                             if (!expanded) setExpanded(true)
@@ -124,15 +131,7 @@ class ShelfController(
                         return true
                     }
                     MotionEvent.ACTION_OUTSIDE -> {
-                        if (expanded) {
-                            val currentTime = System.currentTimeMillis()
-                            if (currentTime - lastOutsideTapTime < doubleTapTimeout) {
-                                setExpanded(false)
-                                lastOutsideTapTime = 0
-                            } else {
-                                lastOutsideTapTime = currentTime
-                            }
-                        }
+                        setExpanded(false)
                         return true
                     }
                 }
@@ -143,26 +142,65 @@ class ShelfController(
         root.setOnDragListener { _, e -> handleDrag(e) }
     }
 
+    private fun setupTopBar() {
+        topBar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 0, 0, (10 * dp).toInt())
+        }
+        
+        // زرار الإعدادات
+        val settingsBtn = TextView(ctx).apply {
+            text = AppConfig.textOptions
+            setTextColor(Color.parseColor(AppConfig.accentColor))
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, 0, (15 * dp).toInt(), 0)
+            setOnClickListener { showOptionsMenu(it) }
+        }
+        
+        // زرار الإغلاق
+        val closeBtn = TextView(ctx).apply {
+            text = AppConfig.textClose
+            setTextColor(Color.parseColor("#FF5A5F"))
+            textSize = 18f
+            setTypeface(null, Typeface.BOLD)
+            setOnClickListener { setExpanded(false) }
+        }
+
+        topBar.addView(settingsBtn)
+        topBar.addView(closeBtn)
+    }
+
+    private fun showOptionsMenu(anchor: View) {
+        val popup = PopupMenu(ctx, anchor)
+        popup.menu.add(0, 1, 0, AppConfig.textSettings)
+        popup.menu.add(0, 2, 1, AppConfig.textClearAll)
+        popup.menu.add(0, 3, 2, AppConfig.textSelect)
+        popup.menu.add(0, 4, 3, AppConfig.textCopy)
+        
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> { /* فتح الإعدادات */ }
+                2 -> { items.clear(); render(); setExpanded(false) }
+                3 -> { /* اختيار */ }
+                4 -> { if (items.isNotEmpty()) onInsert(items[0].text) }
+            }
+            true
+        }
+        popup.show()
+    }
+
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
                 val hasText = e.clipDescription?.hasMimeType("text/*") == true
-                val hasImage = e.clipDescription?.hasMimeType("image/*") == true
-                if (hasText || hasImage) setExpanded(true)
-                return hasText || hasImage
+                if (hasText) setExpanded(true)
+                return hasText
             }
             DragEvent.ACTION_DROP -> {
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        val item = cd.getItemAt(i)
-                        val uri = item.uri
-                        val text = item.text?.toString()
-
-                        if (uri != null) {
-                            add(uri.toString(), true, "صورة")
-                        } else if (text != null) {
-                            add(text, false, "سحب")
-                        }
+                        cd.getItemAt(i).text?.toString()?.let { add(it, "سحب") }
                     }
                 }
             }
@@ -179,54 +217,43 @@ class ShelfController(
         if (added) { wm.removeView(root); added = false }
     }
 
-    fun add(content: String, isImage: Boolean = false, source: String = "تطبيق") {
-        if (content.trim().isEmpty()) return
+    fun add(text: String, source: String = AppConfig.defaultSource) {
+        val t: String = text.trim()
+        if (t.isEmpty()) return
         
-        items.removeAll { it.content == content }
-        
-        val cardColor = when(source.lowercase()) {
-            "whatsapp", "واتساب" -> Color.parseColor("#1B4D3E") 
-            "chrome", "كروم" -> Color.parseColor("#4A2C6B") 
-            else -> Color.parseColor("#1E3A6D") 
-        }
-        
-        items.add(0, ShelfItem(content, isImage, source, cardColor))
+        items.removeAll { it.text == t }
+        items.add(0, ShelfItem(t, source))
         while (items.size > 30) items.removeAt(items.size - 1)
+        
         render()
+        setExpanded(true) // فتح تلقائي عند النسخ
     }
 
     fun setExpanded(on: Boolean) {
         expanded = on
-        // لما يفتح بنكبره، ولما يقفل بنصغره
-        lp.width = if (on) (260 * dp).toInt() else (24 * dp).toInt()
-        lp.height = if (on) (350 * dp).toInt() else (160 * dp).toInt()
-        scroll.visibility = if (on) View.VISIBLE else View.GONE
+        if (on) {
+            lp.width = (AppConfig.shelfOpenWidth * dp).toInt()
+            lp.height = (AppConfig.shelfOpenHeight * dp).toInt()
+            scroll.visibility = View.VISIBLE
+            
+            autoCloseHandler.removeCallbacks(autoCloseRunnable)
+            autoCloseHandler.postDelayed(autoCloseRunnable, 5000) // قفل بعد 5 ثواني
+        } else {
+            lp.width = (AppConfig.shelfClosedWidth * dp).toInt()
+            lp.height = (AppConfig.shelfClosedHeight * dp).toInt()
+            scroll.visibility = View.GONE
+            autoCloseHandler.removeCallbacks(autoCloseRunnable)
+        }
         if (added) wm.updateViewLayout(root, lp)
     }
 
     private fun render() {
         list.removeAllViews()
-        
-        // شريط الإغلاق فقط
-        val topBar = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 0, 0, (10 * dp).toInt())
-        }
-        
-        val closeBtn = TextView(ctx).apply {
-            text = "✕ إغلاق"
-            setTextColor(Color.parseColor("#FF5A5F"))
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            setOnClickListener { setExpanded(false) }
-        }
-
-        topBar.addView(closeBtn)
         list.addView(topBar)
 
         if (items.isEmpty()) {
             list.addView(TextView(ctx).apply {
-                text = "الرف فاضي، اسحب نص أو صورة هنا"
+                text = AppConfig.textEmpty
                 setTextColor(Color.parseColor("#99FFFFFF"))
                 textSize = 13f
             })
@@ -245,7 +272,7 @@ class ShelfController(
         
         val cardBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(item.color)
+            setColor(Color.parseColor(AppConfig.cardBackgroundColor))
             cornerRadius = (12 * dp)
             setStroke((1 * dp).toInt(), Color.parseColor("#554DE1E1"))
         }
@@ -258,60 +285,25 @@ class ShelfController(
         params.setMargins(0, 0, 0, (10 * dp).toInt())
         card.layoutParams = params
 
-        if (item.isImage) {
-            val img = ImageView(ctx)
-            img.layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (150 * dp).toInt()
-            )
-            img.scaleType = ImageView.ScaleType.CENTER_CROP
-            try {
-                img.setImageURI(Uri.parse(item.content))
-            } catch (e: Exception) {
-                // لو حصل خطأ في تحميل الصورة
-            }
-            card.addView(img)
-        } else {
-            val tvText = TextView(ctx)
-            tvText.text = item.content
-            tvText.maxLines = 3
-            tvText.setTextColor(Color.WHITE)
-            tvText.textSize = 14f
-            tvText.setTypeface(null, Typeface.BOLD)
-            card.addView(tvText)
-        }
+        val tvText = TextView(ctx)
+        tvText.text = item.text
+        tvText.maxLines = 3
+        tvText.setTextColor(Color.parseColor(AppConfig.cardTextColor))
+        tvText.textSize = 14f
+        card.addView(tvText)
 
         val tvSource = TextView(ctx)
         tvSource.text = "من: ${item.source}"
-        tvSource.setTextColor(Color.parseColor("#4DE1E1"))
+        tvSource.setTextColor(Color.parseColor(AppConfig.accentColor))
         tvSource.textSize = 11f
         tvSource.setPadding(0, (4 * dp).toInt(), 0, 0)
         card.addView(tvSource)
         
         card.setOnClickListener { 
-            if (item.isImage) {
-                val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = ClipData.newUri(ctx.contentResolver, "image", Uri.parse(item.content))
-                clipboard.setPrimaryClip(clip)
-            } else {
-                onInsert(item.content)
-            }
+            onInsert(item.text)
             setExpanded(false)
         }
         
-        card.setOnLongClickListener { v: View ->
-            val clip = if (item.isImage) {
-                ClipData.newUri(ctx.contentResolver, "image", Uri.parse(item.content))
-            } else {
-                ClipData.newPlainText("shelf", item.content)
-            }
-            v.startDragAndDrop(
-                clip,
-                View.DragShadowBuilder(v),
-                null,
-                View.DRAG_FLAG_GLOBAL
-            )
-        }
         return card
     }
 }
