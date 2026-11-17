@@ -17,15 +17,12 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import java.util.UUID
 import kotlin.math.abs
 
-// كلاس جديد عشان نحفظ النص ومصدره ونعطيه لون
-data class ShelfItem(
-    val id: String = UUID.randomUUID().toString(),
+class ShelfItem(
     val text: String,
-    val sourceApp: String = "جهازك",
-    val color: Int = Color.parseColor("#13264D") // لون افتراضي
+    val sourceApp: String,
+    val color: Int
 )
 
 class ShelfController(
@@ -37,6 +34,7 @@ class ShelfController(
     private val items = ArrayList<ShelfItem>()
     private var expanded = false
     private var added = false
+    private lateinit var lp: WindowManager.LayoutParams
 
     private val list = LinearLayout(ctx).apply { 
         orientation = LinearLayout.VERTICAL
@@ -54,15 +52,14 @@ class ShelfController(
         
         addView(ScrollView(ctx).apply { addView(list) })
         
+        // إعدادات السحب والإفلات
         setOnDragListener { _, e ->
             when (e.action) {
                 DragEvent.ACTION_DRAG_STARTED -> { setExpanded(true); true }
                 DragEvent.ACTION_DROP -> {
                     e.clipData?.let { cd ->
                         for (i in 0 until cd.itemCount)
-                            cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { 
-                                add(it, "سحب وإفلات") 
-                            }
+                            cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { add(it, "سحب") }
                     }
                     true
                 }
@@ -71,6 +68,7 @@ class ShelfController(
             }
         }
 
+        // إعدادات تحريك الرف
         setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -108,34 +106,33 @@ class ShelfController(
         })
     }
 
-    private val lp = WindowManager.LayoutParams(
-        (20 * dp).toInt(), (140 * dp).toInt(),
-        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-        PixelFormat.TRANSLUCENT
-    ).apply { 
-        gravity = Gravity.TOP or Gravity.END
-        x = 0
-        y = 400 
+    init {
+        lp = WindowManager.LayoutParams(
+            (20 * dp).toInt(), (140 * dp).toInt(),
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply { 
+            gravity = Gravity.TOP or Gravity.END
+            x = 0
+            y = 400 
+        }
     }
 
     fun show() { if (!added) { wm.addView(root, lp); added = true } }
     fun hide() { if (added) { wm.removeView(root); added = false } }
 
-    // دالة الإضافة الجديدة اللي بتاخد المصدر
     fun add(text: String, source: String = "تطبيق") {
         val t = text.trim()
         if (t.isEmpty()) return
-        // عشان نمنع التكرار، بنشوف لو النص موجود بنفس المصدر
-        if (items.none { it.text == t && it.sourceApp == source }) {
-            // لون مختلف لكل مصدر
+        if (items.none { it.text == t }) {
             val color = when(source.lowercase()) {
-                "whatsapp", "واتساب" -> Color.parseColor("#1E3B2C") // أخضر غامق
-                "chrome", "كروم" -> Color.parseColor("#2C1E3B") // بنفسجي غامق
-                else -> Color.parseColor("#13264D") // كحلي
+                "whatsapp", "واتساب" -> Color.parseColor("#1E3B2C")
+                "chrome", "كروم" -> Color.parseColor("#2C1E3B")
+                else -> Color.parseColor("#13264D")
             }
-            items.add(0, ShelfItem(text = t, sourceApp = source, color = color))
+            items.add(0, ShelfItem(t, source, color))
             while (items.size > 30) items.removeAt(items.lastIndex)
             render()
         }
@@ -158,7 +155,7 @@ class ShelfController(
                 
                 val cardBg = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    setColor(item.color) // اللون المخصص للمصدر
+                    setColor(item.color)
                     cornerRadius = (12 * dp)
                     setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1"))
                 }
@@ -171,7 +168,6 @@ class ShelfController(
                 params.setMargins(0, 0, 0, (10 * dp).toInt())
                 layoutParams = params
 
-                // النص
                 addView(TextView(ctx).apply {
                     this.text = item.text
                     maxLines = 3
@@ -180,7 +176,6 @@ class ShelfController(
                     setTypeface(null, Typeface.BOLD)
                 })
 
-                // المصدر
                 addView(TextView(ctx).apply {
                     this.text = "من: ${item.sourceApp}"
                     setTextColor(Color.parseColor("#4DE1E1"))
