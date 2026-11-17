@@ -17,10 +17,8 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ListPopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
 import com.bfbai.superhub.AppConfig
@@ -46,6 +44,7 @@ class ShelfController(
     
     private var expanded: Boolean = false
     private var added: Boolean = false
+    private var isRightSide: Boolean = true
 
     private val autoCloseHandler = Handler(Looper.getMainLooper())
     private val autoCloseRunnable = Runnable { setExpanded(false) }
@@ -53,7 +52,10 @@ class ShelfController(
     private val list: LinearLayout = LinearLayout(ctx)
     private val scroll: ScrollView = ScrollView(ctx)
     private val root: FrameLayout = FrameLayout(ctx)
-    private val topBar: LinearLayout = LinearLayout(ctx) // شريط علوي ثابت
+    private val topBar: LinearLayout = LinearLayout(ctx)
+    
+    // لوحة القائمة المخصصة اللي هتظهر جوه الرف
+    private var customMenu: LinearLayout? = null
 
     private val lp: WindowManager.LayoutParams = WindowManager.LayoutParams(
         (AppConfig.SHELF_CLOSED_WIDTH_DP * dp).toInt(),
@@ -70,18 +72,8 @@ class ShelfController(
         lp.x = 0
         lp.y = 400
 
-        val bg = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(AppConfig.SHELF_BG_COLOR)
-            cornerRadii = floatArrayOf(
-                (AppConfig.SHELF_CORNER_RADIUS_DP * dp), (AppConfig.SHELF_CORNER_RADIUS_DP * dp), 
-                0f, 0f, 0f, 0f, 
-                (AppConfig.SHELF_CORNER_RADIUS_DP * dp), (AppConfig.SHELF_CORNER_RADIUS_DP * dp)
-            )
-            setStroke((1 * dp).toInt(), AppConfig.SHELF_STROKE_COLOR)
-        }
-        root.background = bg
-        
+        updateBackground()
+
         list.layoutDirection = View.LAYOUT_DIRECTION_RTL
         list.orientation = LinearLayout.VERTICAL
         val pad = (10 * dp).toInt()
@@ -90,10 +82,9 @@ class ShelfController(
         scroll.addView(list)
         scroll.visibility = View.GONE
         
-        // تجهيز الشريط العلوي الثابت
         topBar.orientation = LinearLayout.HORIZONTAL
         topBar.setPadding(pad, pad, pad, 0)
-        topBar.layoutDirection = list.layoutDirection
+        topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
         
         val title = TextView(ctx).apply {
             text = "SuperHub"
@@ -108,13 +99,12 @@ class ShelfController(
             setTextColor(AppConfig.SHELF_STROKE_COLOR)
             textSize = 20f
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
-            setOnClickListener { showProfessionalMenu(it) }
+            setOnClickListener { showCustomMenu() }
         }
         
         topBar.addView(title)
         topBar.addView(menuBtn)
 
-        // وضع الشريط العلوي والكروت جوه الـ root
         root.addView(topBar)
         root.addView(scroll)
         
@@ -129,6 +119,9 @@ class ShelfController(
 
             override fun onTouch(v: View?, event: MotionEvent?): Boolean {
                 if (event == null) return false
+                // لو القائمة المخصصة مفتوحة، اللمس ميتحركش الرف
+                if (customMenu?.visibility == View.VISIBLE) return false
+
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         initialX = lp.x
@@ -156,14 +149,17 @@ class ShelfController(
                             
                             if (lp.x + (lp.width / 2) > midPoint) {
                                 lp.gravity = Gravity.TOP or Gravity.END
+                                isRightSide = true
                                 list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
                                 topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
                             } else {
                                 lp.gravity = Gravity.TOP or Gravity.START
+                                isRightSide = false
                                 list.layoutDirection = View.LAYOUT_DIRECTION_LTR 
                                 topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
                             }
                             lp.x = 0 
+                            updateBackground() // عكس الحواف (المرايا)
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
                             if (!expanded) setExpanded(true)
@@ -171,7 +167,11 @@ class ShelfController(
                         return true
                     }
                     MotionEvent.ACTION_OUTSIDE -> {
-                        setExpanded(false)
+                        if (customMenu?.visibility == View.VISIBLE) {
+                            hideCustomMenu()
+                        } else {
+                            setExpanded(false)
+                        }
                         return true
                     }
                 }
@@ -180,6 +180,24 @@ class ShelfController(
         })
 
         root.setOnDragListener { _, e -> handleDrag(e) }
+    }
+
+    // الدالة دي عشان تعكس الحواف المدورة صح زي المرايا
+    private fun updateBackground() {
+        val radius = AppConfig.SHELF_CORNER_RADIUS_DP * dp
+        val bg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(AppConfig.SHELF_BG_COLOR)
+            if (isRightSide) {
+                // يمين: مدور من اليمين، مقطوع من الشمال
+                cornerRadii = floatArrayOf(radius, radius, 0f, 0f, 0f, 0f, radius, radius)
+            } else {
+                // شمال: مدور من الشمال، مقطوع من اليمين
+                cornerRadii = floatArrayOf(0f, 0f, radius, radius, radius, radius, 0f, 0f)
+            }
+            setStroke((1 * dp).toInt(), AppConfig.SHELF_STROKE_COLOR)
+        }
+        root.background = bg
     }
 
     private fun handleDrag(e: DragEvent): Boolean {
@@ -192,7 +210,7 @@ class ShelfController(
             DragEvent.ACTION_DROP -> {
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        cd.getItemAt(i).text?.toString()?.let { add(it, "تطبيق آخر") }
+                        cd.getItemAt(i).text?.toString()?.let { add(it, "تطبيق") }
                     }
                 }
             }
@@ -235,9 +253,8 @@ class ShelfController(
             lp.height = (AppConfig.SHELF_EXPANDED_HEIGHT_DP * dp).toInt()
             scroll.visibility = View.VISIBLE
             
-            // تظبيط ارتفاع الكروت عشان الشريط العلوي ياخد مساحته
             val params = scroll.layoutParams as FrameLayout.LayoutParams
-            params.topMargin = (40 * dp).toInt() // مساحة للشريط العلوي
+            params.topMargin = (40 * dp).toInt()
             scroll.layoutParams = params
 
             autoCloseHandler.removeCallbacks(autoCloseRunnable)
@@ -246,6 +263,7 @@ class ShelfController(
             lp.width = (AppConfig.SHELF_CLOSED_WIDTH_DP * dp).toInt()
             lp.height = (AppConfig.SHELF_CLOSED_HEIGHT_DP * dp).toInt()
             scroll.visibility = View.GONE
+            hideCustomMenu()
             autoCloseHandler.removeCallbacks(autoCloseRunnable)
         }
         if (added) wm.updateViewLayout(root, lp)
@@ -266,40 +284,60 @@ class ShelfController(
         }
     }
 
-    private fun showProfessionalMenu(anchorView: View) {
-        val options = listOf("Select", "Clipboard", "Settings", "Close")
-        
-        val popup = ListPopupWindow(ctx)
-        popup.anchorView = anchorView
-        popup.width = (150 * dp).toInt() 
-        popup.isModal = true
-        popup.setBackgroundDrawable(ColorDrawable(AppConfig.MENU_BG_COLOR))
+    // القائمة المخصصة (الاحترافية)
+    private fun showCustomMenu() {
+        if (customMenu == null) {
+            customMenu = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(AppConfig.MENU_BG_COLOR)
+                val pad = (10 * dp).toInt()
+                setPadding(pad, pad, pad, pad)
+                // رفع القائمة عشان تظهر تحت الشريط العلوي
+                y = (50 * dp) 
+                layoutParams = FrameLayout.LayoutParams(
+                    (180 * dp).toInt(),
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
 
-        val adapter = object : ArrayAdapter<String>(ctx, android.R.layout.simple_list_item_1, options) {
-            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
-                val view = super.getView(position, convertView, parent) as TextView
-                view.setTextColor(AppConfig.MENU_TEXT_COLOR)
-                view.textSize = 16f
-                view.setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
-                view.setBackgroundColor(Color.TRANSPARENT)
-                view.layoutDirection = View.LAYOUT_DIRECTION_RTL 
-                return view
+            val options = listOf("Select", "Clipboard", "Settings", "Close")
+            for ((index, opt) in options.withIndex()) {
+                val tv = TextView(ctx).apply {
+                    text = opt
+                    setTextColor(AppConfig.MENU_TEXT_COLOR)
+                    textSize = 16f
+                    setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
+                    layoutDirection = View.LAYOUT_DIRECTION_RTL
+                    setOnClickListener {
+                        if (opt == "Close") {
+                            setExpanded(false)
+                        }
+                        hideCustomMenu()
+                    }
+                }
+                customMenu?.addView(tv)
+
+                // إضافة الخط الفاصل (Divider) ما عدا آخر عنصر
+                if (index < options.size - 1) {
+                    val divider = View(ctx).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            (1 * dp).toInt()
+                        ).apply {
+                            setMargins(0, (4 * dp).toInt(), 0, (4 * dp).toInt())
+                        }
+                        setBackgroundColor(AppConfig.MENU_DIVIDER_COLOR)
+                    }
+                    customMenu?.addView(divider)
+                }
             }
+            root.addView(customMenu)
         }
-        
-        popup.setAdapter(adapter)
-        
-        popup.setOnItemClickListener { _, _, position, _ ->
-            when (position) {
-                0 -> { /* Select */ }
-                1 -> { /* Clipboard */ }
-                2 -> { /* Settings */ }
-                3 -> { setExpanded(false) }
-            }
-            popup.dismiss()
-        }
-        
-        popup.show()
+        customMenu?.visibility = View.VISIBLE
+    }
+
+    private fun hideCustomMenu() {
+        customMenu?.visibility = View.GONE
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -367,6 +405,7 @@ class ShelfController(
             setExpanded(false)
         }
         
+        // تعديل السحب: عشان يتسحب الكارت لوحده
         card.setOnLongClickListener { v: View ->
             val clip = ClipData.newPlainText("shelf", item.text)
             v.startDragAndDrop(clip, View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL)
