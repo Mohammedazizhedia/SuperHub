@@ -29,10 +29,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
             shelf?.show()
         }
 
-        // إزالة الـ Listener القديم لو موجود عشان ميتكررش
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         
-        // إضافة الـ Listener الجديد
         val l = ClipboardManager.OnPrimaryClipChangedListener {
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
@@ -41,7 +39,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     lastText = text
                     Log.d("ClipboardService", "Copied: $text")
                     
+                    // 1. حفظ في السجل (عشان يظهر في الواجهة الرئيسية)
                     SyncManager.addToHistory(text)
+                    // 2. إضافة للرف
                     shelf?.add(text, getAppName())
                 }
             }
@@ -58,10 +58,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
         return packageName.split(".").last().replaceFirstChar { it.uppercase() }
     }
 
-    // دالة الإدراج مع الاحتياطي
     fun insertIntoFocused(text: String) {
         val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
-        lastText = text // عشان الـ Listener ميعملهاش إضافة تانية
+        lastText = text 
         clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
         
         if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
@@ -83,7 +82,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         Log.d("ClipboardService", "Service Destroyed")
-        // تنظيف الـ Listener
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         clipListener = null
         
