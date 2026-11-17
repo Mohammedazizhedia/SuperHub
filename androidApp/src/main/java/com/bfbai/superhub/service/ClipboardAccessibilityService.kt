@@ -9,7 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import com.bfbai.superhub.sync.SyncManager
+import com.bfbai.superhub.AppConfig
 
 class ClipboardAccessibilityService : AccessibilityService() {
 
@@ -20,8 +20,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Log.d("ClipboardService", "Service Connected")
-        
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         
         if (shelf == null) {
@@ -37,11 +35,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 val text = clip.getItemAt(0).text?.toString()
                 if (!text.isNullOrEmpty() && text != lastText) {
                     lastText = text
-                    Log.d("ClipboardService", "Copied: $text")
-                    
-                    SyncManager.addToHistory(text)
-                    // التعديل هنا: بنبعت النص، ونقول إنه مش صورة (false)، والمصدر
-                    shelf?.add(text, false, getAppName())
+                    shelf?.add(text, getAppName())
                 }
             }
         }
@@ -52,7 +46,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private fun getAppName(): String {
         val packageName: String? = rootInActiveWindow?.packageName?.toString()
         if (packageName == null || packageName == "com.bfbai.superhub") {
-            return "تطبيق"
+            return AppConfig.defaultSource
         }
         return packageName.split(".").last().replaceFirstChar { it.uppercase() }
     }
@@ -76,14 +70,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-    
     override fun onInterrupt() {}
 
     override fun onDestroy() {
-        Log.d("ClipboardService", "Service Destroyed")
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         clipListener = null
-        
         shelf?.hide()
         shelf = null
         super.onDestroy()
