@@ -6,6 +6,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -29,10 +30,12 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
+// تعديل 1: إضافة isPinned
 data class ShelfItem(
     val text: String, 
     val source: String, 
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    var isPinned: Boolean = false
 )
 
 @SuppressLint("ClickableViewAccessibility")
@@ -95,6 +98,14 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
+        // تعديل 2: زرار النسخ المباشر
+        val pasteBtn = TextView(ctx).apply {
+            text = "📋"
+            textSize = 18f
+            setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
+            setOnClickListener { pasteFromClipboard() }
+        }
+
         val menuBtn = TextView(ctx).apply {
             text = "⋮⋮"
             setTextColor(AppConfig.SHELF_STROKE_COLOR)
@@ -104,6 +115,7 @@ class ShelfController(
         }
         
         topBar.addView(title)
+        topBar.addView(pasteBtn)
         topBar.addView(menuBtn)
 
         root.addView(topBar)
@@ -111,8 +123,12 @@ class ShelfController(
         
         render()
 
-        // --- إضافة خاصية الضغط المطول للاختفاء والتفتيت ---
+        // تعديل 3: الضغطة المطولة على الـ root والـ topBar
         root.setOnLongClickListener {
+            animateDisappear()
+            true
+        }
+        topBar.setOnLongClickListener {
             animateDisappear()
             true
         }
@@ -150,26 +166,26 @@ class ShelfController(
                     }
                     MotionEvent.ACTION_UP -> {
                         if (isDragging) {
-                        val screenWidth = ctx.resources.displayMetrics.widthPixels
-                        val midPoint = screenWidth / 2
-                        
-                        if (lp.x + (lp.width / 2) > midPoint) {
-                            lp.gravity = Gravity.TOP or Gravity.END
-                            isRightSide = true
-                            list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
-                            topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
+                            val screenWidth = ctx.resources.displayMetrics.widthPixels
+                            val midPoint = screenWidth / 2
+                            
+                            if (lp.x + (lp.width / 2) > midPoint) {
+                                lp.gravity = Gravity.TOP or Gravity.END
+                                isRightSide = true
+                                list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
+                                topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
+                            } else {
+                                lp.gravity = Gravity.TOP or Gravity.START
+                                isRightSide = false
+                                list.layoutDirection = View.LAYOUT_DIRECTION_LTR 
+                                topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
+                            }
+                            lp.x = 0 
+                            updateBackground() 
+                            if (added) wm.updateViewLayout(root, lp)
                         } else {
-                            lp.gravity = Gravity.TOP or Gravity.START
-                            isRightSide = false
-                            list.layoutDirection = View.LAYOUT_DIRECTION_LTR 
-                            topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
+                            if (!expanded) setExpanded(true)
                         }
-                        lp.x = 0 
-                        updateBackground() 
-                        if (added) wm.updateViewLayout(root, lp)
-                    } else {
-                        if (!expanded) setExpanded(true)
-                    }
                         return true
                     }
                     MotionEvent.ACTION_OUTSIDE -> {
@@ -188,7 +204,18 @@ class ShelfController(
         root.setOnDragListener { _, e -> handleDrag(e) }
     }
 
-    // دالة الأنيميشن (التفتيت والاختفاء)
+    // تعديل 4: دالة قراءة الحافظة
+    private fun pasteFromClipboard() {
+        val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip
+        if (clip != null && clip.itemCount > 0) {
+            val text = clip.getItemAt(0).text?.toString()
+            if (!text.isNullOrEmpty()) {
+                add(text, "لصق مباشر")
+            }
+        }
+    }
+
     private fun animateDisappear() {
         val anim = ValueAnimator.ofFloat(1f, 0f)
         anim.duration = 400
@@ -208,7 +235,6 @@ class ShelfController(
         anim.start()
     }
 
-    // عكس الحواف (المرايا)
     private fun updateBackground() {
         val radius = AppConfig.SHELF_CORNER_RADIUS_DP * dp
         val bg = GradientDrawable().apply {
@@ -270,7 +296,9 @@ class ShelfController(
         if (!added) show()
 
         items.removeAll { it.text == t }
-        items.add(0, ShelfItem(t, source))
+        // العناصر المثبتة تتحط فوق
+        val newItem = ShelfItem(t, source)
+        items.add(0, newItem)
         
         render()
         setExpanded(true) 
@@ -308,7 +336,9 @@ class ShelfController(
                 textSize = 13f
             })
         } else {
-            for (item in items) {
+            // ترتيب العناصر: المثبتة الأول
+            val sortedItems = items.sortedByDescending { it.isPinned }
+            for (item in sortedItems) {
                 list.addView(buildItem(item))
             }
         }
@@ -323,7 +353,7 @@ class ShelfController(
                 setPadding(pad, pad, pad, pad)
                 y = (50 * dp) 
                 layoutParams = FrameLayout.LayoutParams(
-                    (150 * dp).toInt(), // <--- تصغير العرض هنا (كان 180)
+                    (150 * dp).toInt(), 
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 )
             }
@@ -370,7 +400,7 @@ class ShelfController(
     @SuppressLint("ClickableViewAccessibility")
     private fun buildItem(item: ShelfItem): LinearLayout {
         val card = LinearLayout(ctx)
-        card.orientation = LinearLayout.VERTICAL
+        card.orientation = LinearLayout.HORIZONTAL // تعديل: خليتها HORIZONTAL عشان نحط زرار التثبيت
         val pad = (12 * dp).toInt()
         card.setPadding(pad, pad, pad, pad)
         card.layoutDirection = list.layoutDirection 
@@ -390,13 +420,19 @@ class ShelfController(
         params.setMargins(0, 0, 0, (8 * dp).toInt())
         card.layoutParams = params
 
+        // الجزء الخاص بالنص
+        val textLayout = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+
         val tvText = TextView(ctx)
         tvText.text = item.text
         tvText.maxLines = 3
         tvText.setTextColor(AppConfig.CARD_TEXT_COLOR)
         tvText.textSize = 14f
         tvText.layoutDirection = View.LAYOUT_DIRECTION_LOCALE 
-        card.addView(tvText)
+        textLayout.addView(tvText)
 
         val dateFormat = SimpleDateFormat("hh:mm a - dd MMM", Locale.getDefault())
         val timeStr = dateFormat.format(Date(item.timestamp))
@@ -407,15 +443,33 @@ class ShelfController(
         tvSource.textSize = 11f
         tvSource.setPadding(0, (4 * dp).toInt(), 0, 0)
         tvSource.layoutDirection = View.LAYOUT_DIRECTION_LOCALE
-        card.addView(tvSource)
+        textLayout.addView(tvSource)
+        
+        card.addView(textLayout)
+
+        // تعديل 5: زرار التثبيت (Pin)
+        val pinBtn = TextView(ctx).apply {
+            text = "📌"
+            textSize = 18f
+            setPadding((8 * dp).toInt(), 0, 0, 0)
+            setTextColor(if (item.isPinned) AppConfig.PIN_ACTIVE_COLOR else AppConfig.PIN_INACTIVE_COLOR)
+            setOnClickListener {
+                item.isPinned = !item.isPinned
+                render() // إعادة الرسم عشان يتحدث اللون والترتيب
+            }
+        }
+        card.addView(pinBtn)
 
         val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null) return false
                 val diffX = e2.x - e1.x
+                // تعديل 6: منع الحذف لو العنصر مثبت
                 if (abs(diffX) > 100 && abs(velocityX) > 100) {
-                    items.remove(item)
-                    render()
+                    if (!item.isPinned) {
+                        items.remove(item)
+                        render()
+                    }
                     return true
                 }
                 return false
