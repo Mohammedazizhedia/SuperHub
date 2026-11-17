@@ -14,7 +14,6 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
-        <!-- خدمة التقاط الحافظة والرف العائم -->
         <service
             android:name=".service.ClipboardAccessibilityService"
             android:exported="true"
@@ -27,7 +26,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- زرار التفعيل في الستارة (Quick Settings Tile) -->
         <service
             android:name=".service.SuperHubTileService"
             android:exported="true"
@@ -39,7 +37,7 @@
             </intent-filter>
         </service>
 
-        <!-- Process Text -->
+        <!-- Activity مخفية عشان تستقبل النص من الواتساب (Process Text) -->
         <activity
             android:name=".ProcessTextActivity"
             android:exported="true"
