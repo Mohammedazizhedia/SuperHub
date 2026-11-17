@@ -22,13 +22,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
         
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         
-        // تشغيل الرف الجديد
         if (shelf == null) {
             shelf = ShelfController(this) { insertIntoFocused(it) }
             shelf?.show()
         }
 
-        // مراقبة الحافظة
         clipboardManager.addPrimaryClipChangedListener {
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
@@ -38,13 +36,26 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     Log.d("ClipboardService", "Copied: $text")
                     
                     SyncManager.addToHistory(text)
-                    shelf?.add(text)
+                    // هنا بنبعت النص للرف مع مصدره (لو عرفناه)
+                    shelf?.add(text, getCurrentAppName())
                 }
             }
         }
     }
 
-    // دالة الإدراج في الخانة المفتوحة
+    // محاولة معرفة اسم التطبيق اللي إحنا فيه دلوقتي
+    private fun getCurrentAppName(): String {
+        val root = rootInActiveWindow ?: return "تطبيق"
+        var node: AccessibilityNodeInfo? = root
+        while (node != null) {
+            if (node.packageName != null && node.packageName != "com.bfbai.superhub") {
+                return node.packageName.toString().split(".").last().capitalize()
+            }
+            node = node.parent
+        }
+        return "تطبيق"
+    }
+
     fun insertIntoFocused(text: String) {
         val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
         clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
