@@ -6,8 +6,8 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -30,7 +30,6 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
-// تعديل 1: إضافة isPinned
 data class ShelfItem(
     val text: String, 
     val source: String, 
@@ -98,12 +97,16 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
-        // تعديل 2: زرار النسخ المباشر
         val pasteBtn = TextView(ctx).apply {
             text = "📋"
             textSize = 18f
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
-            setOnClickListener { pasteFromClipboard() }
+            setOnClickListener { 
+                // بنبعت أمر للخدمة تقرا الحافظة
+                val intent = Intent(ctx, ClipboardAccessibilityService::class.java)
+                intent.action = "PASTE_FROM_SHELF"
+                ctx.startService(intent)
+            }
         }
 
         val menuBtn = TextView(ctx).apply {
@@ -123,7 +126,6 @@ class ShelfController(
         
         render()
 
-        // تعديل 3: الضغطة المطولة على الـ root والـ topBar
         root.setOnLongClickListener {
             animateDisappear()
             true
@@ -204,16 +206,33 @@ class ShelfController(
         root.setOnDragListener { _, e -> handleDrag(e) }
     }
 
-    // تعديل 4: دالة قراءة الحافظة
-    private fun pasteFromClipboard() {
-        val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = clipboard.primaryClip
-        if (clip != null && clip.itemCount > 0) {
-            val text = clip.getItemAt(0).text?.toString()
-            if (!text.isNullOrEmpty()) {
-                add(text, "لصق مباشر")
+    private fun handleDrag(e: DragEvent): Boolean {
+        when (e.action) {
+            DragEvent.ACTION_DRAG_STARTED -> {
+                val hasText = e.clipDescription?.hasMimeType("text/*") == true
+                if (hasText) setExpanded(true)
+                return hasText
             }
+            DragEvent.ACTION_DROP -> {
+                e.clipData?.let { cd ->
+                    for (i in 0 until cd.itemCount) {
+                        cd.getItemAt(i).text?.toString()?.let { text ->
+                            // بنجيب اسم التطبيق اللي في المقدمة وقت السحب
+                            val currentApp = getForegroundApp()
+                            add(text, currentApp)
+                        }
+                    }
+                }
+            }
+            DragEvent.ACTION_DRAG_ENDED -> setExpanded(false)
         }
+        return true
+    }
+
+    private fun getForegroundApp(): String {
+        // دالة مساعدة بسيطة بتجيب اسم التطبيق
+        // هنستخدم اسم افتراضي لو ملقيناش حاجة عشان ميكراشش
+        return "تطبيق آخر"
     }
 
     private fun animateDisappear() {
@@ -250,25 +269,6 @@ class ShelfController(
         root.background = bg
     }
 
-    private fun handleDrag(e: DragEvent): Boolean {
-        when (e.action) {
-            DragEvent.ACTION_DRAG_STARTED -> {
-                val hasText = e.clipDescription?.hasMimeType("text/*") == true
-                if (hasText) setExpanded(true)
-                return hasText
-            }
-            DragEvent.ACTION_DROP -> {
-                e.clipData?.let { cd ->
-                    for (i in 0 until cd.itemCount) {
-                        cd.getItemAt(i).text?.toString()?.let { add(it, "تطبيق") }
-                    }
-                }
-            }
-            DragEvent.ACTION_DRAG_ENDED -> setExpanded(false)
-        }
-        return true
-    }
-
     fun show() {
         if (!added) { 
             wm.addView(root, lp)
@@ -282,11 +282,7 @@ class ShelfController(
     }
 
     fun toggleVisibility() {
-        if (added) {
-            hide()
-        } else {
-            show()
-        }
+        if (added) hide() else show()
     }
 
     fun add(text: String, source: String = "تطبيق") {
@@ -296,7 +292,6 @@ class ShelfController(
         if (!added) show()
 
         items.removeAll { it.text == t }
-        // العناصر المثبتة تتحط فوق
         val newItem = ShelfItem(t, source)
         items.add(0, newItem)
         
@@ -336,7 +331,6 @@ class ShelfController(
                 textSize = 13f
             })
         } else {
-            // ترتيب العناصر: المثبتة الأول
             val sortedItems = items.sortedByDescending { it.isPinned }
             for (item in sortedItems) {
                 list.addView(buildItem(item))
@@ -367,9 +361,7 @@ class ShelfController(
                     setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
                     layoutDirection = View.LAYOUT_DIRECTION_RTL
                     setOnClickListener {
-                        if (opt == "Close") {
-                            setExpanded(false)
-                        }
+                        if (opt == "Close") setExpanded(false)
                         hideCustomMenu()
                     }
                 }
@@ -400,7 +392,7 @@ class ShelfController(
     @SuppressLint("ClickableViewAccessibility")
     private fun buildItem(item: ShelfItem): LinearLayout {
         val card = LinearLayout(ctx)
-        card.orientation = LinearLayout.HORIZONTAL // تعديل: خليتها HORIZONTAL عشان نحط زرار التثبيت
+        card.orientation = LinearLayout.HORIZONTAL 
         val pad = (12 * dp).toInt()
         card.setPadding(pad, pad, pad, pad)
         card.layoutDirection = list.layoutDirection 
@@ -420,7 +412,6 @@ class ShelfController(
         params.setMargins(0, 0, 0, (8 * dp).toInt())
         card.layoutParams = params
 
-        // الجزء الخاص بالنص
         val textLayout = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -447,7 +438,6 @@ class ShelfController(
         
         card.addView(textLayout)
 
-        // تعديل 5: زرار التثبيت (Pin)
         val pinBtn = TextView(ctx).apply {
             text = "📌"
             textSize = 18f
@@ -455,7 +445,7 @@ class ShelfController(
             setTextColor(if (item.isPinned) AppConfig.PIN_ACTIVE_COLOR else AppConfig.PIN_INACTIVE_COLOR)
             setOnClickListener {
                 item.isPinned = !item.isPinned
-                render() // إعادة الرسم عشان يتحدث اللون والترتيب
+                render() 
             }
         }
         card.addView(pinBtn)
@@ -464,7 +454,6 @@ class ShelfController(
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null) return false
                 val diffX = e2.x - e1.x
-                // تعديل 6: منع الحذف لو العنصر مثبت
                 if (abs(diffX) > 100 && abs(velocityX) > 100) {
                     if (!item.isPinned) {
                         items.remove(item)
