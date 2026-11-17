@@ -12,9 +12,13 @@ object AppConfig {
     val CARD_SUBTEXT_COLOR: Int = Color.parseColor("#CCFFFFFF")
 
     // 🎨 ألوان القائمة (زجاجية زي الرف)
-    val MENU_BG_COLOR: Int = Color.parseColor("#D90B1B3A") // كحلي شفاف
+    val MENU_BG_COLOR: Int = Color.parseColor("#D90B1B3A") 
     val MENU_TEXT_COLOR: Int = Color.WHITE
-    val MENU_DIVIDER_COLOR: Int = Color.parseColor("#4DE1E1") // خط فاصل سماوي شفاف
+    val MENU_DIVIDER_COLOR: Int = Color.parseColor("#4DE1E1") 
+
+    // 🎨 ألوان زرار التثبيت (Pin)
+    val PIN_ACTIVE_COLOR: Int = Color.parseColor("#FFD700") // ذهبي لما يكون مثبت
+    val PIN_INACTIVE_COLOR: Int = Color.parseColor("#99FFFFFF") // أبيض شفاف لما يكون مش مثبت
 
     // 📏 الحجم
     val SHELF_CLOSED_WIDTH_DP: Float = 14f 
