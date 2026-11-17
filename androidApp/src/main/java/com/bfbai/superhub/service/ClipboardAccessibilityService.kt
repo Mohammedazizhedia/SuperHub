@@ -39,10 +39,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     lastText = text
                     Log.d("ClipboardService", "Copied: $text")
                     
-                    // 1. حفظ في السجل (عشان يظهر في الواجهة الرئيسية)
                     SyncManager.addToHistory(text)
-                    // 2. إضافة للرف
-                    shelf?.add(text, getAppName())
+                    // التعديل هنا: بنبعت النص، ونقول إنه مش صورة (false)، والمصدر
+                    shelf?.add(text, false, getAppName())
                 }
             }
         }
