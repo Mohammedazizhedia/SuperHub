@@ -50,7 +50,18 @@ class ClipboardAccessibilityService : AccessibilityService() {
     // استقبال الأمر من زرار الكونترول بانل
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "TOGGLE_SHELF") {
-            shelf?.toggleVisibility()
+            // لو الرف مش مفتوح، بنجيب اللي في الحافظة عشان التطبيقات اللي بتمنع القراءة زي الواتس
+            if (shelf != null) {
+                val clip = clipboardManager.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).text?.toString()
+                    if (!text.isNullOrEmpty() && text != lastText) {
+                        lastText = text
+                        shelf?.add(text, getAppName())
+                    }
+                }
+                shelf?.toggleVisibility()
+            }
         }
         return super.onStartCommand(intent, flags, startId)
     }
