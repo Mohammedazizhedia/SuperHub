@@ -31,6 +31,9 @@ class ShelfController(
     private val items: ArrayList<ShelfItem> = ArrayList()
     private var expanded: Boolean = false
     private var added: Boolean = false
+    
+    private var lastTapTime: Long = 0
+    private val doubleTapTimeout: Long = 300
 
     private val list: LinearLayout = LinearLayout(ctx)
     private val scroll: ScrollView = ScrollView(ctx)
@@ -53,7 +56,7 @@ class ShelfController(
 
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor("#E60B1B3A"))
+            setColor(Color.parseColor("#E60B1B3A")) // الكحلي الغامق
             cornerRadii = floatArrayOf((16 * dp), (16 * dp), 0f, 0f, 0f, 0f, (16 * dp), (16 * dp))
         }
         root.background = bg
@@ -62,7 +65,6 @@ class ShelfController(
         val pad = (12 * dp).toInt()
         list.setPadding(pad, pad, pad, pad)
         
-        // إعداد الـ ScrollView
         scroll.addView(list)
         root.addView(scroll)
         scroll.visibility = View.GONE
@@ -93,11 +95,24 @@ class ShelfController(
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!isDragging) setExpanded(!expanded)
+                        if (!isDragging) {
+                            val currentTime = System.currentTimeMillis()
+                            if (expanded) {
+                                if (currentTime - lastTapTime < doubleTapTimeout) {
+                                    setExpanded(false)
+                                }
+                                lastTapTime = currentTime
+                            } else {
+                                setExpanded(true)
+                                lastTapTime = 0
+                            }
+                        }
                         return true
                     }
                     MotionEvent.ACTION_OUTSIDE -> {
-                        if (expanded) setExpanded(false)
+                        if (expanded) {
+                            setExpanded(false)
+                        }
                         return true
                     }
                 }
@@ -131,21 +146,20 @@ class ShelfController(
         if (added) { wm.removeView(root); added = false }
     }
 
-    // الدالة دي بقت بتحفظ في السجل كمان
     fun add(text: String, source: String = "تطبيق") {
         val t: String = text.trim()
         if (t.isEmpty()) return
         
         items.removeAll { it.text == t }
         
+        // التصميم الأول (الكروت الغامقة)
         val cardColor = when(source.lowercase()) {
-            "whatsapp", "واتساب" -> Color.parseColor("#991E3B2C")
-            "chrome", "كروم" -> Color.parseColor("#992C1E3B")
-            else -> Color.parseColor("#9913264D")
+            "whatsapp", "واتساب" -> Color.parseColor("#1E3B2C")
+            "chrome", "كروم" -> Color.parseColor("#2C1E3B")
+            else -> Color.parseColor("#13264D")
         }
         
         items.add(0, ShelfItem(t, source, cardColor))
-        // مسحنا شرط الـ 3، وخليتها 30
         while (items.size > 30) items.removeAt(items.size - 1)
         render()
     }
@@ -160,9 +174,6 @@ class ShelfController(
 
     private fun render() {
         list.removeAllViews()
-        
-        // شيلنا زرار الإغلاق (X) من هنا خلاص
-
         for (item in items) {
             list.addView(buildItem(item))
         }
@@ -176,9 +187,9 @@ class ShelfController(
         
         val cardBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(item.color)
+            setColor(item.color) // اللون الغامق
             cornerRadius = (12 * dp)
-            setStroke((1 * dp).toInt(), Color.parseColor("#554DE1E1"))
+            setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1"))
         }
         card.background = cardBg
         
