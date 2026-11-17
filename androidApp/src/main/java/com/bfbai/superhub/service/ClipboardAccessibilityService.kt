@@ -18,8 +18,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var shelf: ShelfController? = null
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
     private var isShelfVisible = true
-    
-    // عشان نحفظ اسم التطبيق اللي اتنسخ منه
     private var lastAppName: String = "تطبيق" 
 
     override fun onServiceConnected() {
@@ -41,11 +39,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 val text = clip.getItemAt(0).text?.toString()
                 if (!text.isNullOrEmpty() && text != lastText) {
                     lastText = text
-                    
-                    // بنجيب اسم التطبيق هنا ونحفظه
                     lastAppName = getAppName()
-                    Log.d("ClipboardService", "Copied: $text from $lastAppName")
-                    
                     shelf?.add(text, lastAppName)
                 }
             }
@@ -66,13 +60,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 }
             }
             "PASTE_FROM_SHELF" -> {
-                // لو المستخدم داس على زرار اللصق في الرف
                 val clip = clipboardManager.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val text = clip.getItemAt(0).text?.toString()
                     if (!text.isNullOrEmpty()) {
                         lastText = text
-                        // بناخد الاسم اللي سجلناه قبل كده
                         shelf?.add(text, lastAppName)
                     }
                 }
@@ -82,7 +74,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     private fun getAppName(): String {
-        // بنجيب الباكدج نيم للتطبيق اللي في المقدمة
         val packageName: String? = rootInActiveWindow?.packageName?.toString()
         if (packageName == null || packageName == "com.bfbai.superhub") {
             return if (lastAppName != "تطبيق") lastAppName else "تطبيق"
