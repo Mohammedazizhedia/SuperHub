@@ -87,7 +87,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         Log.d("ClipboardService", "Service Destroyed")
-        clipListener?.let { clipboardManager.removeClipboardListener(it) }
+        clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         clipListener = null
         
         shelf?.hide()
