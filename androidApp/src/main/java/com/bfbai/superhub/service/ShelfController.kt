@@ -1,17 +1,23 @@
 // Built with BFB.AI
 package com.bfbai.superhub.service
 
+import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.Context
+import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.view.DragEvent
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import kotlin.math.abs
 
 class ShelfController(
     private val ctx: Context,
@@ -23,11 +29,26 @@ class ShelfController(
     private var expanded = false
     private var added = false
 
-    private val list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+    // قائمة النصوص
+    private val list = LinearLayout(ctx).apply { 
+        orientation = LinearLayout.VERTICAL
+        setPadding((12 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt())
+    }
+    
+    // الشريط الخلفي
+    @SuppressLint("ClickableViewAccessibility")
     private val root = FrameLayout(ctx).apply {
-        setBackgroundColor(0xE6202124.toInt())
+        // خلفية دائرية بلون كحلي شفاف شوية
+        val bg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(Color.parseColor("#E60B1B3A")) // كحلي بشفافية 90%
+            cornerRadii = floatArrayOf((16 * dp), (16 * dp), 0f, 0f, 0f, 0f, (16 * dp), (16 * dp))
+        }
+        background = bg
+        
         addView(ScrollView(ctx).apply { addView(list) })
-        setOnClickListener { if (!expanded) setExpanded(true) else setExpanded(false) }
+        
+        // تأثير السحب والإفلات
         setOnDragListener { _, e ->
             when (e.action) {
                 DragEvent.ACTION_DRAG_STARTED -> { setExpanded(true); true }
@@ -42,15 +63,59 @@ class ShelfController(
                 else -> true
             }
         }
+
+        // كود السحب للرف نفسه
+        setOnTouchListener(object : View.OnTouchListener {
+            private var initialX = 0
+            private var initialY = 0
+            private var initialTouchX = 0f
+            private var initialTouchY = 0f
+            private var isDragging = false
+
+            override fun onTouch(v: View?, event: MotionEvent?): Boolean {
+                when (event?.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = lp.x
+                        initialY = lp.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        isDragging = false
+                        return true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val deltaX = (event.rawX - initialTouchX).toInt()
+                        val deltaY = (event.rawY - initialTouchY).toInt()
+                        if (abs(deltaX) > 10 || abs(deltaY) > 10) isDragging = true
+                        
+                        lp.x = initialX + deltaX
+                        lp.y = initialY + deltaY
+                        if (added) wm.updateViewLayout(root, lp)
+                        return true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (!isDragging) {
+                            // لو مجرد ضغطة (مش سحب)، نفتح أو نقفل الرف
+                            setExpanded(!expanded)
+                        }
+                        return true
+                    }
+                }
+                return false
+            }
+        })
     }
 
     private val lp = WindowManager.LayoutParams(
-        (24 * dp).toInt(), (160 * dp).toInt(),
+        (20 * dp).toInt(), (140 * dp).toInt(), // أبعاد الشريط المقفول
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
         PixelFormat.TRANSLUCENT
-    ).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
+    ).apply { 
+        gravity = Gravity.TOP or Gravity.END
+        x = 0
+        y = 400 // مكان مبدئي
+    }
 
     fun show() { if (!added) { wm.addView(root, lp); added = true } }
     fun hide() { if (added) { wm.removeView(root); added = false } }
@@ -58,16 +123,18 @@ class ShelfController(
     fun add(text: String) {
         val t = text.trim()
         if (t.isEmpty()) return
-        items.remove(t)
-        items.add(0, t)
-        while (items.size > 30) items.removeAt(items.lastIndex)
-        render()
+        if (!items.contains(t)) {
+            items.add(0, t)
+            while (items.size > 30) items.removeAt(items.lastIndex)
+            render()
+        }
     }
 
     fun setExpanded(on: Boolean) {
         expanded = on
-        lp.width = if (on) (170 * dp).toInt() else (24 * dp).toInt()
-        lp.height = if (on) (320 * dp).toInt() else (160 * dp).toInt()
+        // أبعاد الرف لما يفتح
+        lp.width = if (on) (260 * dp).toInt() else (20 * dp).toInt()
+        lp.height = if (on) (350 * dp).toInt() else (140 * dp).toInt()
         list.visibility = if (on) View.VISIBLE else View.INVISIBLE
         if (added) wm.updateViewLayout(root, lp)
     }
@@ -75,15 +142,40 @@ class ShelfController(
     private fun render() {
         list.removeAllViews()
         items.forEach { text ->
-            list.addView(TextView(ctx).apply {
-                this.text = text
-                maxLines = 2
-                setTextColor(0xFFFFFFFF.toInt())
-                setPadding((10 * dp).toInt(), (10 * dp).toInt(), (10 * dp).toInt(), (10 * dp).toInt())
+            // تصميم الكارت
+            val card = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding((14 * dp).toInt(), (14 * dp).toInt(), (14 * dp).toInt(), (14 * dp).toInt())
+                
+                val cardBg = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    setColor(Color.parseColor("#13264D")) // لون البطاقة
+                    cornerRadius = (12 * dp)
+                    setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1")) // إطار تركواز خفيف
+                }
+                background = cardBg
+                
+                val params = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                params.setMargins(0, 0, 0, (10 * dp).toInt())
+                layoutParams = params
+
+                // نص البطاقة
+                addView(TextView(ctx).apply {
+                    this.text = text
+                    maxLines = 3
+                    setTextColor(Color.WHITE)
+                    textSize = 14f
+                    setTypeface(null, Typeface.BOLD)
+                })
+                
                 setOnClickListener { 
                     onInsert(text)
                     setExpanded(false)
                 }
+                
                 setOnLongClickListener { v ->
                     v.startDragAndDrop(
                         ClipData.newPlainText("shelf", text),
@@ -91,7 +183,8 @@ class ShelfController(
                     )
                     true
                 }
-            })
+            }
+            list.addView(card)
         }
     }
 }
