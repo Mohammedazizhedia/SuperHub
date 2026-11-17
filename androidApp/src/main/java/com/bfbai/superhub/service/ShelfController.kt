@@ -111,7 +111,7 @@ class ShelfController(
         
         render()
 
-        // --- خاصية الضغط المطول للاختفاء والتفيت ---
+        // --- إضافة خاصية الضغط المطول للاختفاء والتفتيت ---
         root.setOnLongClickListener {
             animateDisappear()
             true
@@ -150,26 +150,26 @@ class ShelfController(
                     }
                     MotionEvent.ACTION_UP -> {
                         if (isDragging) {
-                            val screenWidth = ctx.resources.displayMetrics.widthPixels
-                            val midPoint = screenWidth / 2
-                            
-                            if (lp.x + (lp.width / 2) > midPoint) {
-                                lp.gravity = Gravity.TOP or Gravity.END
-                                isRightSide = true
-                                list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
-                                topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
-                            } else {
-                                lp.gravity = Gravity.TOP or Gravity.START
-                                isRightSide = false
-                                list.layoutDirection = View.LAYOUT_DIRECTION_LTR 
-                                topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
-                            }
-                            lp.x = 0 
-                            updateBackground() 
-                            if (added) wm.updateViewLayout(root, lp)
+                        val screenWidth = ctx.resources.displayMetrics.widthPixels
+                        val midPoint = screenWidth / 2
+                        
+                        if (lp.x + (lp.width / 2) > midPoint) {
+                            lp.gravity = Gravity.TOP or Gravity.END
+                            isRightSide = true
+                            list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
+                            topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
                         } else {
-                            if (!expanded) setExpanded(true)
+                            lp.gravity = Gravity.TOP or Gravity.START
+                            isRightSide = false
+                            list.layoutDirection = View.LAYOUT_DIRECTION_LTR 
+                            topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
                         }
+                        lp.x = 0 
+                        updateBackground() 
+                        if (added) wm.updateViewLayout(root, lp)
+                    } else {
+                        if (!expanded) setExpanded(true)
+                    }
                         return true
                     }
                     MotionEvent.ACTION_OUTSIDE -> {
@@ -188,6 +188,7 @@ class ShelfController(
         root.setOnDragListener { _, e -> handleDrag(e) }
     }
 
+    // دالة الأنيميشن (التفتيت والاختفاء)
     private fun animateDisappear() {
         val anim = ValueAnimator.ofFloat(1f, 0f)
         anim.duration = 400
@@ -207,6 +208,7 @@ class ShelfController(
         anim.start()
     }
 
+    // عكس الحواف (المرايا)
     private fun updateBackground() {
         val radius = AppConfig.SHELF_CORNER_RADIUS_DP * dp
         val bg = GradientDrawable().apply {
@@ -320,9 +322,8 @@ class ShelfController(
                 val pad = (10 * dp).toInt()
                 setPadding(pad, pad, pad, pad)
                 y = (50 * dp) 
-                // تصغير عرض القائمة لـ 150 بدل 180
                 layoutParams = FrameLayout.LayoutParams(
-                    (150 * dp).toInt(),
+                    (150 * dp).toInt(), // <--- تصغير العرض هنا (كان 180)
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 )
             }
