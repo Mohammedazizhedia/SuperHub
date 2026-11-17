@@ -2,7 +2,6 @@
 package com.bfbai.superhub.service
 
 import android.content.Intent
-import android.os.Build
 import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
@@ -19,13 +18,11 @@ class SuperHubTileService : TileService() {
         super.onClick()
         
         if (isAccessibilityServiceEnabled()) {
-            // لو الخدمة شغالة، الزرار هيفتح/يقفل الستارة
-            // بنبعت أمر للخدمة إنها تفتح أو تقفل
+            // إرسال أمر للخدمة عشان تفتح أو تقفل الرف
             val intent = Intent(this, ClipboardAccessibilityService::class.java)
             intent.action = "TOGGLE_SHELF"
             startService(intent)
         } else {
-            // لو الخدمة مش شغالة، بنفتح الإعدادات عشان المستخدم يفعلها
             val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivityAndCollapse(intent)
