@@ -5,25 +5,36 @@ import android.graphics.Color
 
 object AppConfig {
     // ==========================================
-    // 🎨 إعدادات الألوان (الثيم والكروت)
+    // 🎨 إعدادات الألوان والشفافية (زجاجي)
     // ==========================================
-    val SHELF_BG_COLOR: Int = Color.parseColor("#F20B1B3A")
-    val SHELF_STROKE_COLOR: Int = Color.parseColor("#4DE1E1")
-    val CARD_BG_COLOR: Int = Color.parseColor("#1E3A6D")
-    val CARD_WHATSAPP_COLOR: Int = Color.parseColor("#1B4D3E")
-    val CARD_CHROME_COLOR: Int = Color.parseColor("#4A2C6B")
+    // لون خلفية الرف (شفاف عالي - زجاجي)
+    val SHELF_BG_COLOR: Int = Color.parseColor("#990B1B3A") 
+    // لون حدود الرف
+    val SHELF_STROKE_COLOR: Int = Color.parseColor("#804DE1E1")
+    
+    // ألوان الكروت (شفافة عالية عشان تبقى زجاجية)
+    val CARD_BG_COLOR: Int = Color.parseColor("#B31E3A6D")
+    val CARD_WHATSAPP_COLOR: Int = Color.parseColor("#B31B4D3E")
+    val CARD_CHROME_COLOR: Int = Color.parseColor("#B34A2C6B")
+    
+    // ألوان النصوص
     val CARD_TEXT_COLOR: Int = Color.WHITE
-    val CARD_SUBTEXT_COLOR: Int = Color.parseColor("#99FFFFFF")
+    val CARD_SUBTEXT_COLOR: Int = Color.parseColor("#CCFFFFFF")
     val CLOSE_BTN_COLOR: Int = Color.parseColor("#FF5A5F")
 
     // ==========================================
     // 📏 إعدادات الحجم والشكل
     // ==========================================
-    val SHELF_CLOSED_WIDTH_DP: Float = 12f
-    val SHELF_CLOSED_HEIGHT_DP: Float = 80f
-    val SHELF_EXPANDED_WIDTH_DP: Float = 260f
-    val SHELF_EXPANDED_HEIGHT_DP: Float = 350f
-    val SHELF_CORNER_RADIUS_DP: Float = 20f
+    // عرض وطول الرف وهو مقفول (شريط رفيع جداً ومش بارز)
+    val SHELF_CLOSED_WIDTH_DP: Float = 6f
+    val SHELF_CLOSED_HEIGHT_DP: Float = 50f
+    
+    // عرض وطول الرف وهو مفتوح (أصغر ومش واخد الشاشة كلها)
+    val SHELF_EXPANDED_WIDTH_DP: Float = 220f
+    val SHELF_EXPANDED_HEIGHT_DP: Float = 280f
+    
+    // زوايا الانحناء للرف
+    val SHELF_CORNER_RADIUS_DP: Float = 16f
 
     // ==========================================
     // ⏱️ إعدادات الوقت
