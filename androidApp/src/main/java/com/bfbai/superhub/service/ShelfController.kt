@@ -1,13 +1,15 @@
 // Built with BFB.AI
 package com.bfbai.superhub.service
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
@@ -54,7 +56,6 @@ class ShelfController(
     private val root: FrameLayout = FrameLayout(ctx)
     private val topBar: LinearLayout = LinearLayout(ctx)
     
-    // لوحة القائمة المخصصة اللي هتظهر جوه الرف
     private var customMenu: LinearLayout? = null
 
     private val lp: WindowManager.LayoutParams = WindowManager.LayoutParams(
@@ -110,6 +111,12 @@ class ShelfController(
         
         render()
 
+        // --- إضافة خاصية الضغط المطول للاختفاء والتفتيت ---
+        root.setOnLongClickListener {
+            animateDisappear()
+            true
+        }
+
         root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -119,7 +126,6 @@ class ShelfController(
 
             override fun onTouch(v: View?, event: MotionEvent?): Boolean {
                 if (event == null) return false
-                // لو القائمة المخصصة مفتوحة، اللمس ميتحركش الرف
                 if (customMenu?.visibility == View.VISIBLE) return false
 
                 when (event.action) {
@@ -159,7 +165,7 @@ class ShelfController(
                                 topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
                             }
                             lp.x = 0 
-                            updateBackground() // عكس الحواف (المرايا)
+                            updateBackground() 
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
                             if (!expanded) setExpanded(true)
@@ -182,17 +188,35 @@ class ShelfController(
         root.setOnDragListener { _, e -> handleDrag(e) }
     }
 
-    // الدالة دي عشان تعكس الحواف المدورة صح زي المرايا
+    // دالة الأنيميشن (التفتيت والاختفاء)
+    private fun animateDisappear() {
+        val anim = ValueAnimator.ofFloat(1f, 0f)
+        anim.duration = 400
+        anim.addUpdateListener { animation ->
+            val value = animation.animatedValue as Float
+            root.alpha = value
+            lp.y = 400 + ((1f - value) * 150).toInt()
+            if (added) wm.updateViewLayout(root, lp)
+        }
+        anim.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                hide()
+                root.alpha = 1f
+                lp.y = 400
+            }
+        })
+        anim.start()
+    }
+
+    // عكس الحواف (المرايا)
     private fun updateBackground() {
         val radius = AppConfig.SHELF_CORNER_RADIUS_DP * dp
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             setColor(AppConfig.SHELF_BG_COLOR)
             if (isRightSide) {
-                // يمين: مدور من اليمين، مقطوع من الشمال
                 cornerRadii = floatArrayOf(radius, radius, 0f, 0f, 0f, 0f, radius, radius)
             } else {
-                // شمال: مدور من الشمال، مقطوع من اليمين
                 cornerRadii = floatArrayOf(0f, 0f, radius, radius, radius, radius, 0f, 0f)
             }
             setStroke((1 * dp).toInt(), AppConfig.SHELF_STROKE_COLOR)
@@ -220,7 +244,11 @@ class ShelfController(
     }
 
     fun show() {
-        if (!added) { wm.addView(root, lp); added = true }
+        if (!added) { 
+            wm.addView(root, lp)
+            added = true 
+            root.alpha = 1f
+        }
     }
 
     fun hide() {
@@ -228,10 +256,10 @@ class ShelfController(
     }
 
     fun toggleVisibility() {
-        if (expanded) {
-            setExpanded(false)
+        if (added) {
+            hide()
         } else {
-            setExpanded(true)
+            show()
         }
     }
 
@@ -239,6 +267,8 @@ class ShelfController(
         val t = text.trim()
         if (t.isEmpty()) return
         
+        if (!added) show()
+
         items.removeAll { it.text == t }
         items.add(0, ShelfItem(t, source))
         
@@ -284,15 +314,13 @@ class ShelfController(
         }
     }
 
-    // القائمة المخصصة (الاحترافية)
     private fun showCustomMenu() {
         if (customMenu == null) {
             customMenu = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(AppConfig.MENU_BG_COLOR)
+                setBackgroundColor(AppConfig.MENU_BG_COLOR) // اللون الزجاجي الجديد
                 val pad = (10 * dp).toInt()
                 setPadding(pad, pad, pad, pad)
-                // رفع القائمة عشان تظهر تحت الشريط العلوي
                 y = (50 * dp) 
                 layoutParams = FrameLayout.LayoutParams(
                     (180 * dp).toInt(),
@@ -317,7 +345,6 @@ class ShelfController(
                 }
                 customMenu?.addView(tv)
 
-                // إضافة الخط الفاصل (Divider) ما عدا آخر عنصر
                 if (index < options.size - 1) {
                     val divider = View(ctx).apply {
                         layoutParams = LinearLayout.LayoutParams(
@@ -405,7 +432,6 @@ class ShelfController(
             setExpanded(false)
         }
         
-        // تعديل السحب: عشان يتسحب الكارت لوحده
         card.setOnLongClickListener { v: View ->
             val clip = ClipData.newPlainText("shelf", item.text)
             v.startDragAndDrop(clip, View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL)
