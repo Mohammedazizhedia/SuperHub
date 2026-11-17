@@ -7,6 +7,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
@@ -15,9 +16,10 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.ArrayAdapter
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.PopupMenu
+import android.widget.ListPopupWindow
 import android.widget.ScrollView
 import android.widget.TextView
 import com.bfbai.superhub.AppConfig
@@ -78,7 +80,6 @@ class ShelfController(
         }
         root.background = bg
         
-        // تظبيط الاتجاه للمرايا
         list.layoutDirection = View.LAYOUT_DIRECTION_RTL
         list.orientation = LinearLayout.VERTICAL
         val pad = (10 * dp).toInt()
@@ -126,10 +127,10 @@ class ShelfController(
                             
                             if (lp.x + (lp.width / 2) > midPoint) {
                                 lp.gravity = Gravity.TOP or Gravity.END
-                                list.layoutDirection = View.LAYOUT_DIRECTION_RTL // لو يمين، يبقى المرايا شمال
+                                list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
                             } else {
                                 lp.gravity = Gravity.TOP or Gravity.START
-                                list.layoutDirection = View.LAYOUT_DIRECTION_LTR // لو شمال، يبقى المرايا يمين
+                                list.layoutDirection = View.LAYOUT_DIRECTION_LTR 
                             }
                             lp.x = 0 
                             if (added) wm.updateViewLayout(root, lp)
@@ -160,7 +161,7 @@ class ShelfController(
             DragEvent.ACTION_DROP -> {
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        cd.getItemAt(i).text?.toString()?.let { add(it, "سحب") }
+                        cd.getItemAt(i).text?.toString()?.let { add(it, "تطبيق آخر") }
                     }
                 }
             }
@@ -220,7 +221,6 @@ class ShelfController(
         val topBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, (10 * dp).toInt())
-            // عشان المرايا تظبط في الشريط العلوي
             layoutDirection = list.layoutDirection 
         }
         
@@ -237,7 +237,7 @@ class ShelfController(
             setTextColor(AppConfig.SHELF_STROKE_COLOR)
             textSize = 20f
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
-            setOnClickListener { showMenu(it) }
+            setOnClickListener { showProfessionalMenu(it) }
         }
         
         topBar.addView(title)
@@ -257,23 +257,43 @@ class ShelfController(
         }
     }
 
-    // تعديل القائمة عشان تفتح في الاتجاه الصح (مرايا)
-    private fun showMenu(v: View) {
-        val popup = PopupMenu(ctx, v)
-        popup.menu.add(0, 1, 1, "Select")
-        popup.menu.add(0, 2, 2, "Clipboard")
-        popup.menu.add(0, 3, 3, "Settings")
-        popup.menu.add(0, 4, 4, "Close")
+    // دالة القائمة الاحترافية الجديدة
+    private fun showProfessionalMenu(anchorView: View) {
+        val options = listOf("Select", "Clipboard", "Settings", "Close")
         
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                1 -> { true }
-                2 -> { true }
-                3 -> { true }
-                4 -> { setExpanded(false); true }
-                else -> false
+        val popup = ListPopupWindow(ctx)
+        popup.anchorView = anchorView
+        popup.width = (150 * dp).toInt() 
+        popup.isModal = true
+        popup.setBackgroundDrawable(ColorDrawable(AppConfig.MENU_BG_COLOR))
+
+        val adapter = object : ArrayAdapter<String>(ctx, android.R.layout.simple_list_item_1, options) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val view = super.getView(position, convertView, parent) as TextView
+                view.setTextColor(AppConfig.MENU_TEXT_COLOR)
+                view.textSize = 16f
+                view.setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
+                // فصل العناصر بخط شيك
+                view.setBackgroundColor(Color.TRANSPARENT)
+                return view
             }
         }
+        
+        popup.adapter = adapter
+        popup.divider = ColorDrawable(AppConfig.MENU_DIVIDER_COLOR)
+        popup.dividerHeight = (1 * dp).toInt()
+        
+        popup.setOnItemClickListener { _, _, position, _ ->
+            when (position) {
+                0 -> { /* Select */ }
+                1 -> { /* Clipboard */ }
+                2 -> { /* Settings */ }
+                3 -> { setExpanded(false) }
+            }
+            popup.dismiss()
+        }
+        
+        // تظبيط اتجاه القائمة حسب مكان الرف
         popup.show()
     }
 
@@ -282,7 +302,6 @@ class ShelfController(
         card.orientation = LinearLayout.VERTICAL
         val pad = (12 * dp).toInt()
         card.setPadding(pad, pad, pad, pad)
-        // تظبيط المرايا للكارت
         card.layoutDirection = list.layoutDirection 
         
         val cardBg = GradientDrawable().apply {
@@ -305,7 +324,6 @@ class ShelfController(
         tvText.maxLines = 3
         tvText.setTextColor(AppConfig.CARD_TEXT_COLOR)
         tvText.textSize = 14f
-        // النص يفضل في اتجاهه الطبيعي عشان ميتعكسش
         tvText.layoutDirection = View.LAYOUT_DIRECTION_LOCALE 
         card.addView(tvText)
 
