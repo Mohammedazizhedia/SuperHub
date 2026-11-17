@@ -37,10 +37,10 @@
             </intent-filter>
         </service>
 
-        <!-- الـ Activity دي عشان واتساب والفيسبوك -->
         <activity
             android:name=".ProcessTextActivity"
             android:exported="true"
+            android:label="SuperHub" 
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.PROCESS_TEXT" />
