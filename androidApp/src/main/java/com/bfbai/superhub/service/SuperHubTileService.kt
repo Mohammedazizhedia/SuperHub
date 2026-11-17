@@ -3,9 +3,10 @@ package com.bfbai.superhub.service
 
 import android.content.Intent
 import android.os.Build
+import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
-import android.provider.Settings
+import android.text.TextUtils
 
 class SuperHubTileService : TileService() {
 
@@ -17,14 +18,14 @@ class SuperHubTileService : TileService() {
     override fun onClick() {
         super.onClick()
         
-        // لو التطبيق شغال، بنقفله. لو واقف، بنشغله.
         if (isAccessibilityServiceEnabled()) {
-            // إيقاف الخدمة (مش هنقدر نوقفها برمجياً من غير روت، فهنفتح الإعدادات)
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivityAndCollapse(intent)
+            // لو الخدمة شغالة، الزرار هيفتح/يقفل الستارة
+            // بنبعت أمر للخدمة إنها تفتح أو تقفل
+            val intent = Intent(this, ClipboardAccessibilityService::class.java)
+            intent.action = "TOGGLE_SHELF"
+            startService(intent)
         } else {
-            // فتح إعدادات الـ Accessibility عشان المستخدم يفعلها
+            // لو الخدمة مش شغالة، بنفتح الإعدادات عشان المستخدم يفعلها
             val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivityAndCollapse(intent)
@@ -39,7 +40,7 @@ class SuperHubTileService : TileService() {
                 contentResolver,
                 Settings.Secure.ACCESSIBILITY_ENABLED
             )
-            val mStringColonSplitter = android.text.TextUtils.SimpleStringSplitter(':')
+            val mStringColonSplitter = TextUtils.SimpleStringSplitter(':')
             if (accessibilityEnabled == 1) {
                 val settingValue = Settings.Secure.getString(
                     contentResolver,
