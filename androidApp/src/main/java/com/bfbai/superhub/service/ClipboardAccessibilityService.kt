@@ -22,11 +22,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
         
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         
+        // تشغيل الرف الجديد
         if (shelf == null) {
             shelf = ShelfController(this) { insertIntoFocused(it) }
             shelf?.show()
         }
 
+        // مراقبة الحافظة
         clipboardManager.addPrimaryClipChangedListener {
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
@@ -36,13 +38,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     Log.d("ClipboardService", "Copied: $text")
                     
                     SyncManager.addToHistory(text)
-                    SyncManager.broadcastToOverlay(text)
                     shelf?.add(text)
                 }
             }
         }
     }
 
+    // دالة الإدراج في الخانة المفتوحة
     fun insertIntoFocused(text: String) {
         val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
         clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
