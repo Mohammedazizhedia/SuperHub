@@ -4,17 +4,17 @@ package com.bfbai.superhub
 import android.graphics.Color
 
 object AppConfig {
-    // 🎨 الألوان
+    // 🎨 ألوان الرف والكروت
     val SHELF_BG_COLOR: Int = Color.parseColor("#990B1B3A") 
     val SHELF_STROKE_COLOR: Int = Color.parseColor("#804DE1E1")
     val CARD_BG_COLOR: Int = Color.parseColor("#B31E3A6D")
     val CARD_TEXT_COLOR: Int = Color.WHITE
     val CARD_SUBTEXT_COLOR: Int = Color.parseColor("#CCFFFFFF")
 
-    // 🎨 ألوان القائمة الاحترافية
-    val MENU_BG_COLOR: Int = Color.WHITE
-    val MENU_TEXT_COLOR: Int = Color.BLACK
-    val MENU_DIVIDER_COLOR: Int = Color.parseColor("#E0E0E0") // لون الخط الفاصل
+    // 🎨 ألوان القائمة (زجاجية زي الرف)
+    val MENU_BG_COLOR: Int = Color.parseColor("#D90B1B3A") // كحلي شفاف
+    val MENU_TEXT_COLOR: Int = Color.WHITE
+    val MENU_DIVIDER_COLOR: Int = Color.parseColor("#4DE1E1") // خط فاصل سماوي شفاف
 
     // 📏 الحجم
     val SHELF_CLOSED_WIDTH_DP: Float = 14f 
