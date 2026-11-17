@@ -12,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.view.DragEvent
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -257,7 +258,6 @@ class ShelfController(
         }
     }
 
-    // القائمة الاحترافية باستخدام الدوال الصح
     private fun showProfessionalMenu(anchorView: View) {
         val options = listOf("Select", "Clipboard", "Settings", "Close")
         
@@ -274,7 +274,6 @@ class ShelfController(
                 view.textSize = 16f
                 view.setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
                 view.setBackgroundColor(Color.TRANSPARENT)
-                // تظبيط اتجاه النص جوه القائمة
                 view.layoutDirection = View.LAYOUT_DIRECTION_RTL 
                 return view
             }
@@ -282,7 +281,6 @@ class ShelfController(
         
         popup.setAdapter(adapter)
         popup.setDividerDrawable(ColorDrawable(AppConfig.MENU_DIVIDER_COLOR))
-        popup.setDividerHeight((1 * dp).toInt())
         
         popup.setOnItemClickListener { _, _, position, _ ->
             when (position) {
@@ -297,6 +295,7 @@ class ShelfController(
         popup.show()
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun buildItem(item: ShelfItem): LinearLayout {
         val card = LinearLayout(ctx)
         card.orientation = LinearLayout.VERTICAL
@@ -337,6 +336,27 @@ class ShelfController(
         tvSource.setPadding(0, (4 * dp).toInt(), 0, 0)
         tvSource.layoutDirection = View.LAYOUT_DIRECTION_LOCALE
         card.addView(tvSource)
+
+        // --- إضافة خاصية السحب للحذف (Swipe to Dismiss) ---
+        val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                if (e1 == null) return false
+                val diffX = e2.x - e1.x
+                // لو السحب أفقياً وكان سريع كفاية
+                if (abs(diffX) > 100 && abs(velocityX) > 100) {
+                    // حذف العنصر من المصفوفة
+                    items.remove(item)
+                    render() // إعادة رسم الرف
+                    return true
+                }
+                return false
+            }
+        })
+
+        card.setOnTouchListener { v, event ->
+            gestureDetector.onTouchEvent(event)
+            false // نرجع false عشان الكليك العادي يشتغل برضه
+        }
         
         card.setOnClickListener { 
             onInsert(item.text)
