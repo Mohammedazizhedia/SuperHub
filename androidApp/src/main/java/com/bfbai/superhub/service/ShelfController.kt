@@ -257,7 +257,7 @@ class ShelfController(
         }
     }
 
-    // دالة القائمة الاحترافية الجديدة
+    // القائمة الاحترافية باستخدام الدوال الصح
     private fun showProfessionalMenu(anchorView: View) {
         val options = listOf("Select", "Clipboard", "Settings", "Close")
         
@@ -273,15 +273,16 @@ class ShelfController(
                 view.setTextColor(AppConfig.MENU_TEXT_COLOR)
                 view.textSize = 16f
                 view.setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
-                // فصل العناصر بخط شيك
                 view.setBackgroundColor(Color.TRANSPARENT)
+                // تظبيط اتجاه النص جوه القائمة
+                view.layoutDirection = View.LAYOUT_DIRECTION_RTL 
                 return view
             }
         }
         
-        popup.adapter = adapter
-        popup.divider = ColorDrawable(AppConfig.MENU_DIVIDER_COLOR)
-        popup.dividerHeight = (1 * dp).toInt()
+        popup.setAdapter(adapter)
+        popup.setDividerDrawable(ColorDrawable(AppConfig.MENU_DIVIDER_COLOR))
+        popup.setDividerHeight((1 * dp).toInt())
         
         popup.setOnItemClickListener { _, _, position, _ ->
             when (position) {
@@ -293,7 +294,6 @@ class ShelfController(
             popup.dismiss()
         }
         
-        // تظبيط اتجاه القائمة حسب مكان الرف
         popup.show()
     }
 
