@@ -18,10 +18,17 @@ class SuperHubTileService : TileService() {
         super.onClick()
         
         if (isAccessibilityServiceEnabled()) {
-            // إرسال أمر للخدمة عشان تفتح أو تقفل الرف
             val intent = Intent(this, ClipboardAccessibilityService::class.java)
             intent.action = "TOGGLE_SHELF"
             startService(intent)
+            
+            // بنغير لون الزرار هنا (Active / Inactive)
+            if (qsTile?.state == Tile.STATE_ACTIVE) {
+                qsTile?.state = Tile.STATE_INACTIVE
+            } else {
+                qsTile?.state = Tile.STATE_ACTIVE
+            }
+            qsTile?.updateTile()
         } else {
             val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -61,6 +68,7 @@ class SuperHubTileService : TileService() {
 
     private fun updateTileState() {
         val tile: Tile = qsTile ?: return
+        // لما التطبيق يشتغل لأول مرة، بنخلي لونه شغال (أزرق)
         if (isAccessibilityServiceEnabled()) {
             tile.state = Tile.STATE_ACTIVE
         } else {
