@@ -48,15 +48,28 @@ class ClipboardAccessibilityService : AccessibilityService() {
         clipboardManager.addPrimaryClipChangedListener(l)
     }
 
-    // استقبال الأمر من زرار الكونترول بانل
+    // استقبال الأوامر (من زرار الكونترول بانل أو من الواتساب)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "TOGGLE_SHELF") {
-            if (isShelfVisible) {
-                shelf?.hide()
-                isShelfVisible = false
-            } else {
-                shelf?.show()
-                isShelfVisible = true
+        when (intent?.action) {
+            "TOGGLE_SHELF" -> {
+                if (isShelfVisible) {
+                    shelf?.hide()
+                    isShelfVisible = false
+                } else {
+                    shelf?.show()
+                    isShelfVisible = true
+                }
+            }
+            "ADD_FROM_PROCESS_TEXT" -> {
+                // بنقرا النص من الحافظة اللي الواتساب حطها
+                val clip = clipboardManager.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).text?.toString()
+                    if (!text.isNullOrEmpty()) {
+                        lastText = text
+                        shelf?.add(text, getAppName())
+                    }
+                }
             }
         }
         return super.onStartCommand(intent, flags, startId)
