@@ -17,7 +17,16 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.util.UUID
 import kotlin.math.abs
+
+// كلاس جديد عشان نحفظ النص ومصدره ونعطيه لون
+data class ShelfItem(
+    val id: String = UUID.randomUUID().toString(),
+    val text: String,
+    val sourceApp: String = "جهازك",
+    val color: Int = Color.parseColor("#13264D") // لون افتراضي
+)
 
 class ShelfController(
     private val ctx: Context,
@@ -25,37 +34,35 @@ class ShelfController(
 ) {
     private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val dp = ctx.resources.displayMetrics.density
-    private val items = ArrayList<String>()
+    private val items = ArrayList<ShelfItem>()
     private var expanded = false
     private var added = false
 
-    // قائمة النصوص
     private val list = LinearLayout(ctx).apply { 
         orientation = LinearLayout.VERTICAL
         setPadding((12 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt(), (12 * dp).toInt())
     }
     
-    // الشريط الخلفي
     @SuppressLint("ClickableViewAccessibility")
     private val root = FrameLayout(ctx).apply {
-        // خلفية دائرية بلون كحلي شفاف شوية
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor("#E60B1B3A")) // كحلي بشفافية 90%
+            setColor(Color.parseColor("#E60B1B3A"))
             cornerRadii = floatArrayOf((16 * dp), (16 * dp), 0f, 0f, 0f, 0f, (16 * dp), (16 * dp))
         }
         background = bg
         
         addView(ScrollView(ctx).apply { addView(list) })
         
-        // تأثير السحب والإفلات
         setOnDragListener { _, e ->
             when (e.action) {
                 DragEvent.ACTION_DRAG_STARTED -> { setExpanded(true); true }
                 DragEvent.ACTION_DROP -> {
                     e.clipData?.let { cd ->
                         for (i in 0 until cd.itemCount)
-                            cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { add(it) }
+                            cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { 
+                                add(it, "سحب وإفلات") 
+                            }
                     }
                     true
                 }
@@ -64,7 +71,6 @@ class ShelfController(
             }
         }
 
-        // كود السحب للرف نفسه
         setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -93,10 +99,7 @@ class ShelfController(
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!isDragging) {
-                            // لو مجرد ضغطة (مش سحب)، نفتح أو نقفل الرف
-                            setExpanded(!expanded)
-                        }
+                        if (!isDragging) setExpanded(!expanded)
                         return true
                     }
                 }
@@ -106,7 +109,7 @@ class ShelfController(
     }
 
     private val lp = WindowManager.LayoutParams(
-        (20 * dp).toInt(), (140 * dp).toInt(), // أبعاد الشريط المقفول
+        (20 * dp).toInt(), (140 * dp).toInt(),
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
@@ -114,17 +117,25 @@ class ShelfController(
     ).apply { 
         gravity = Gravity.TOP or Gravity.END
         x = 0
-        y = 400 // مكان مبدئي
+        y = 400 
     }
 
     fun show() { if (!added) { wm.addView(root, lp); added = true } }
     fun hide() { if (added) { wm.removeView(root); added = false } }
 
-    fun add(text: String) {
+    // دالة الإضافة الجديدة اللي بتاخد المصدر
+    fun add(text: String, source: String = "تطبيق") {
         val t = text.trim()
         if (t.isEmpty()) return
-        if (!items.contains(t)) {
-            items.add(0, t)
+        // عشان نمنع التكرار، بنشوف لو النص موجود بنفس المصدر
+        if (items.none { it.text == t && it.sourceApp == source }) {
+            // لون مختلف لكل مصدر
+            val color = when(source.lowercase()) {
+                "whatsapp", "واتساب" -> Color.parseColor("#1E3B2C") // أخضر غامق
+                "chrome", "كروم" -> Color.parseColor("#2C1E3B") // بنفسجي غامق
+                else -> Color.parseColor("#13264D") // كحلي
+            }
+            items.add(0, ShelfItem(text = t, sourceApp = source, color = color))
             while (items.size > 30) items.removeAt(items.lastIndex)
             render()
         }
@@ -132,7 +143,6 @@ class ShelfController(
 
     fun setExpanded(on: Boolean) {
         expanded = on
-        // أبعاد الرف لما يفتح
         lp.width = if (on) (260 * dp).toInt() else (20 * dp).toInt()
         lp.height = if (on) (350 * dp).toInt() else (140 * dp).toInt()
         list.visibility = if (on) View.VISIBLE else View.INVISIBLE
@@ -141,17 +151,16 @@ class ShelfController(
 
     private fun render() {
         list.removeAllViews()
-        items.forEach { text ->
-            // تصميم الكارت
+        items.forEach { item ->
             val card = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding((14 * dp).toInt(), (14 * dp).toInt(), (14 * dp).toInt(), (14 * dp).toInt())
                 
                 val cardBg = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    setColor(Color.parseColor("#13264D")) // لون البطاقة
+                    setColor(item.color) // اللون المخصص للمصدر
                     cornerRadius = (12 * dp)
-                    setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1")) // إطار تركواز خفيف
+                    setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1"))
                 }
                 background = cardBg
                 
@@ -162,23 +171,31 @@ class ShelfController(
                 params.setMargins(0, 0, 0, (10 * dp).toInt())
                 layoutParams = params
 
-                // نص البطاقة
+                // النص
                 addView(TextView(ctx).apply {
-                    this.text = text
+                    this.text = item.text
                     maxLines = 3
                     setTextColor(Color.WHITE)
                     textSize = 14f
                     setTypeface(null, Typeface.BOLD)
                 })
+
+                // المصدر
+                addView(TextView(ctx).apply {
+                    this.text = "من: ${item.sourceApp}"
+                    setTextColor(Color.parseColor("#4DE1E1"))
+                    textSize = 11f
+                    setPadding(0, (4 * dp).toInt(), 0, 0)
+                })
                 
                 setOnClickListener { 
-                    onInsert(text)
+                    onInsert(item.text)
                     setExpanded(false)
                 }
                 
                 setOnLongClickListener { v ->
                     v.startDragAndDrop(
-                        ClipData.newPlainText("shelf", text),
+                        ClipData.newPlainText("shelf", item.text),
                         View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL
                     )
                     true
