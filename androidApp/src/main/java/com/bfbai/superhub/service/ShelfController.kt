@@ -43,7 +43,6 @@ class ShelfController(
     
     private var expanded: Boolean = false
     private var added: Boolean = false
-    private var isRightSide: Boolean = true
 
     private val autoCloseHandler = Handler(Looper.getMainLooper())
     private val autoCloseRunnable = Runnable { setExpanded(false) }
@@ -125,12 +124,10 @@ class ShelfController(
                             
                             if (lp.x + (lp.width / 2) > midPoint) {
                                 lp.gravity = Gravity.TOP or Gravity.END
-                                isRightSide = true
                             } else {
                                 lp.gravity = Gravity.TOP or Gravity.START
-                                isRightSide = false
                             }
-                            lp.x = 0
+                            lp.x = 0 // تصفير الإحداثي عشان يلزق في الحافة الجديدة صح
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
                             if (!expanded) setExpanded(true)
@@ -176,6 +173,15 @@ class ShelfController(
         if (added) { wm.removeView(root); added = false }
     }
 
+    // الدالة دي عشان زرار الكونترول بانل يقدر يتحكم في الرف
+    fun toggleVisibility() {
+        if (expanded) {
+            setExpanded(false)
+        } else {
+            setExpanded(true)
+        }
+    }
+
     fun add(text: String, source: String = "تطبيق") {
         val t = text.trim()
         if (t.isEmpty()) return
@@ -188,7 +194,7 @@ class ShelfController(
         }
         
         render()
-        setExpanded(true) // الفتح التلقائي لما ييجي نص
+        setExpanded(true) 
     }
 
     fun setExpanded(on: Boolean) {
@@ -212,7 +218,6 @@ class ShelfController(
     private fun render() {
         list.removeAllViews()
         
-        // --- شريط علوي (4 نقط + اسم التطبيق) ---
         val topBar = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, (10 * dp).toInt())
@@ -238,7 +243,6 @@ class ShelfController(
         topBar.addView(menuBtn)
         list.addView(topBar)
 
-        // --- قائمة الكروت ---
         if (items.isEmpty()) {
             list.addView(TextView(ctx).apply {
                 text = "الرف فاضي..."
@@ -261,9 +265,9 @@ class ShelfController(
         
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
-                1 -> { /* Select - سيتم برمجته لاحقاً */ true }
-                2 -> { /* Clipboard - سيتم برمجته لاحقاً */ true }
-                3 -> { /* Settings - سيتم برمجته لاحقاً */ true }
+                1 -> { true }
+                2 -> { true }
+                3 -> { true }
                 4 -> { setExpanded(false); true }
                 else -> false
             }
@@ -274,22 +278,23 @@ class ShelfController(
     private fun buildItem(item: ShelfItem): LinearLayout {
         val card = LinearLayout(ctx)
         card.orientation = LinearLayout.VERTICAL
-        val pad = (14 * dp).toInt()
+        val pad = (12 * dp).toInt()
         card.setPadding(pad, pad, pad, pad)
         
         val cardBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             setColor(AppConfig.CARD_BG_COLOR)
-            cornerRadius = (12 * dp)
+            cornerRadius = (10 * dp)
             setStroke((1 * dp).toInt(), AppConfig.SHELF_STROKE_COLOR)
         }
         card.background = cardBg
         
+        // ضبط أبعاد الكارت عشان يبقى متناسق
         val params = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        params.setMargins(0, 0, 0, (10 * dp).toInt())
+        params.setMargins(0, 0, 0, (8 * dp).toInt())
         card.layoutParams = params
 
         val tvText = TextView(ctx)
@@ -299,7 +304,6 @@ class ShelfController(
         tvText.textSize = 14f
         card.addView(tvText)
 
-        // اسم التطبيق والوقت
         val dateFormat = SimpleDateFormat("hh:mm a - dd MMM", Locale.getDefault())
         val timeStr = dateFormat.format(Date(item.timestamp))
         
