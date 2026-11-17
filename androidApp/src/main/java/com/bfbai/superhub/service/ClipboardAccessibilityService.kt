@@ -36,24 +36,21 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     Log.d("ClipboardService", "Copied: $text")
                     
                     SyncManager.addToHistory(text)
-                    // هنا بنبعت النص للرف مع مصدره (لو عرفناه)
-                    shelf?.add(text, getCurrentAppName())
+                    // بنبعت النص للرف مع اسم التطبيق
+                    shelf?.add(text, getAppName())
                 }
             }
         }
     }
 
-    // محاولة معرفة اسم التطبيق اللي إحنا فيه دلوقتي
-    private fun getCurrentAppName(): String {
-        val root = rootInActiveWindow ?: return "تطبيق"
-        var node: AccessibilityNodeInfo? = root
-        while (node != null) {
-            if (node.packageName != null && node.packageName != "com.bfbai.superhub") {
-                return node.packageName.toString().split(".").last().capitalize()
-            }
-            node = node.parent
+    // طريقة أسهل لمعرفة التطبيق اللي في المقدمة
+    private fun getAppName(): String {
+        var packageName: String? = rootInActiveWindow?.packageName?.toString()
+        if (packageName == null || packageName == "com.bfbai.superhub") {
+            return "تطبيق"
         }
-        return "تطبيق"
+        // بناخد آخر جزء من اسم الحزمة (مثلاً com.whatsapp يبقى whatsapp)
+        return packageName.split(".").last().replaceFirstChar { it.uppercase() }
     }
 
     fun insertIntoFocused(text: String) {
