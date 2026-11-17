@@ -97,12 +97,13 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
+        // زرار اللصق (بيفتح الستارة لو مقفولة ويقرا الحافظة)
         val pasteBtn = TextView(ctx).apply {
             text = "📋"
             textSize = 18f
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener { 
-                // بنبعت أمر للخدمة تقرا الحافظة
+                if (!expanded) setExpanded(true)
                 val intent = Intent(ctx, ClipboardAccessibilityService::class.java)
                 intent.action = "PASTE_FROM_SHELF"
                 ctx.startService(intent)
@@ -126,6 +127,7 @@ class ShelfController(
         
         render()
 
+        // الضغطة المطولة عشان تختفي
         root.setOnLongClickListener {
             animateDisappear()
             true
@@ -216,23 +218,13 @@ class ShelfController(
             DragEvent.ACTION_DROP -> {
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        cd.getItemAt(i).text?.toString()?.let { text ->
-                            // بنجيب اسم التطبيق اللي في المقدمة وقت السحب
-                            val currentApp = getForegroundApp()
-                            add(text, currentApp)
-                        }
+                        cd.getItemAt(i).text?.toString()?.let { add(it, "تطبيق") }
                     }
                 }
             }
             DragEvent.ACTION_DRAG_ENDED -> setExpanded(false)
         }
         return true
-    }
-
-    private fun getForegroundApp(): String {
-        // دالة مساعدة بسيطة بتجيب اسم التطبيق
-        // هنستخدم اسم افتراضي لو ملقيناش حاجة عشان ميكراشش
-        return "تطبيق آخر"
     }
 
     private fun animateDisappear() {
@@ -477,7 +469,7 @@ class ShelfController(
         
         card.setOnLongClickListener { v: View ->
             val clip = ClipData.newPlainText("shelf", item.text)
-            v.startDragAndDrop(clip, View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL)
+            v.startDragAndDrop(clip, View.DragShadowBuilder(v), null, View.DRAG_FLOATING)
         }
         return card
     }
