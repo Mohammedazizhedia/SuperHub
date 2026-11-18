@@ -32,8 +32,8 @@ import java.util.Locale
 import kotlin.math.abs
 
 data class ShelfItem(
-    val text: String, 
-    val source: String, 
+    val text: String,
+    val source: String,
     val timestamp: Long = System.currentTimeMillis(),
     var isPinned: Boolean = false
 )
@@ -46,11 +46,11 @@ class ShelfController(
     private val wm: WindowManager = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val dp: Float = ctx.resources.displayMetrics.density
     private val items: ArrayList<ShelfItem> = ArrayList()
-    
+
     private var expanded: Boolean = false
     private var added: Boolean = false
     private var isRightSide: Boolean = true
-    private var dropped: Boolean = false // عشان الإفلات
+    private var dropped: Boolean = false
 
     var onShownChanged: ((Boolean) -> Unit)? = null
     val isShown: Boolean get() = added
@@ -62,7 +62,7 @@ class ShelfController(
     private val scroll: ScrollView = ScrollView(ctx)
     private val root: FrameLayout = FrameLayout(ctx)
     private val topBar: LinearLayout = LinearLayout(ctx)
-    
+
     private var customMenu: LinearLayout? = null
 
     private val lp: WindowManager.LayoutParams = WindowManager.LayoutParams(
@@ -86,15 +86,15 @@ class ShelfController(
         list.orientation = LinearLayout.VERTICAL
         val pad = (10 * dp).toInt()
         list.setPadding(pad, pad, pad, pad)
-        
+
         scroll.addView(list)
         scroll.visibility = View.GONE
         scroll.setOnTouchListener { _, _ -> resetAutoClose(); false }
-        
+
         topBar.orientation = LinearLayout.HORIZONTAL
         topBar.setPadding(pad, pad, pad, 0)
         topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
-        
+
         val title = TextView(ctx).apply {
             text = "SuperHub"
             setTextColor(Color.WHITE)
@@ -102,13 +102,13 @@ class ShelfController(
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        
+
         val pasteBtn = TextView(ctx).apply {
-            text = "⎘" 
+            text = "⎘"
             textSize = 24f
             setTextColor(AppConfig.ACTION_ICON_COLOR)
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
-            setOnClickListener { 
+            setOnClickListener {
                 if (!expanded) setExpanded(true)
                 readClipboardNow { text -> add(text, "لصق مباشر") }
             }
@@ -121,14 +121,14 @@ class ShelfController(
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener { showCustomMenu() }
         }
-        
+
         topBar.addView(title)
         topBar.addView(pasteBtn)
         topBar.addView(menuBtn)
 
         root.addView(topBar)
         root.addView(scroll)
-        
+
         render()
 
         root.setOnTouchListener(object : View.OnTouchListener {
@@ -145,6 +145,13 @@ class ShelfController(
 
             override fun onTouch(v: View?, event: MotionEvent?): Boolean {
                 if (event == null) return false
+
+                if (event.action == MotionEvent.ACTION_OUTSIDE) {
+                    if (customMenu?.visibility == View.VISIBLE) hideCustomMenu()
+                    else if (expanded) setExpanded(false)
+                    return true
+                }
+
                 if (customMenu?.visibility == View.VISIBLE) return false
 
                 when (event.action) {
@@ -155,7 +162,7 @@ class ShelfController(
                         initialTouchY = event.rawY
                         isDragging = false
                         isLongPressed = false
-                        
+
                         resetAutoClose()
                         autoCloseHandler.postDelayed(longPressRunnable, 600)
                         return true
@@ -163,44 +170,41 @@ class ShelfController(
                     MotionEvent.ACTION_MOVE -> {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
-                        
+
                         if (abs(deltaX) > 15 || abs(deltaY) > 15) {
                             isDragging = true
                             autoCloseHandler.removeCallbacks(longPressRunnable)
-                            
-                            // التعديل هنا: تصحيح الاتجاه بناءً على الجانب
-                            lp.x = if (isRightSide) (initialX - deltaX).coerceAtLeast(0) else (initialX + deltaX).coerceAtLeast(0)
-                            val maxY = maxOf(0, ctx.resources.displayMetrics.heightPixels - lp.height)
-                            lp.y = (initialY + deltaY).coerceIn(0, maxY)
-                            
+
+                            val rawX = if (isRightSide) initialX - deltaX else initialX + deltaX
+                            lp.x = rawX.coerceIn(0, maxX())
+                            lp.y = (initialY + deltaY).coerceIn(0, maxY())
                             if (added) wm.updateViewLayout(root, lp)
+
                             resetAutoClose()
                         }
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
                         autoCloseHandler.removeCallbacks(longPressRunnable)
-                        
+
                         if (isLongPressed) return true
-                        
+
                         if (isDragging) {
-                            val screenWidth = ctx.resources.displayMetrics.widthPixels
-                            val midPoint = screenWidth / 2
-                            
-                            // التعديل هنا: الاعتماد على مكان الصباع
+                            val midPoint = ctx.resources.displayMetrics.widthPixels / 2
+
                             if (event.rawX > midPoint) {
                                 lp.gravity = Gravity.TOP or Gravity.END
                                 isRightSide = true
-                                list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
+                                list.layoutDirection = View.LAYOUT_DIRECTION_RTL
                                 topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
                             } else {
                                 lp.gravity = Gravity.TOP or Gravity.START
                                 isRightSide = false
-                                list.layoutDirection = View.LAYOUT_DIRECTION_LTR 
+                                list.layoutDirection = View.LAYOUT_DIRECTION_LTR
                                 topBar.layoutDirection = View.LAYOUT_DIRECTION_LTR
                             }
-                            lp.x = 0 
-                            updateBackground() 
+                            lp.x = 0
+                            updateBackground()
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
                             if (!expanded) setExpanded(true)
@@ -211,12 +215,6 @@ class ShelfController(
                         autoCloseHandler.removeCallbacks(longPressRunnable)
                         return true
                     }
-                    MotionEvent.ACTION_OUTSIDE -> {
-                        // التعديل هنا: منع التحديث المتكرر
-                        if (customMenu?.visibility == View.VISIBLE) hideCustomMenu()
-                        else if (expanded) setExpanded(false)
-                        return true
-                    }
                 }
                 return false
             }
@@ -224,6 +222,12 @@ class ShelfController(
 
         root.setOnDragListener { _, e -> handleDrag(e) }
     }
+
+    private fun maxX(): Int =
+        maxOf(0, ctx.resources.displayMetrics.widthPixels - lp.width)
+
+    private fun maxY(): Int =
+        maxOf(0, ctx.resources.displayMetrics.heightPixels - lp.height)
 
     private fun resetAutoClose() {
         autoCloseHandler.removeCallbacks(autoCloseRunnable)
@@ -246,7 +250,8 @@ class ShelfController(
             if (added) {
                 try {
                     wm.updateViewLayout(root, lp)
-                } catch (e: Exception) {}
+                } catch (e: Exception) {
+                }
             }
             if (t.isNullOrBlank()) {
                 Toast.makeText(ctx, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
@@ -260,7 +265,6 @@ class ShelfController(
         readClipboardNow { add(it, "لصق مباشر") }
     }
 
-    // التعديل هنا: إصلاح الإفلات
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
@@ -287,19 +291,21 @@ class ShelfController(
     }
 
     private fun animateDisappear() {
+        val startY = lp.y
         val anim = ValueAnimator.ofFloat(1f, 0f)
         anim.duration = 400
         anim.addUpdateListener { animation ->
+            if (!added) return@addUpdateListener
             val value = animation.animatedValue as Float
             root.alpha = value
-            lp.y = 400 + ((1f - value) * 150).toInt()
-            if (added) wm.updateViewLayout(root, lp)
+            lp.y = startY + ((1f - value) * 150).toInt()
+            wm.updateViewLayout(root, lp)
         }
         anim.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator) {
                 hide()
                 root.alpha = 1f
-                lp.y = 400
+                lp.y = startY
             }
         })
         anim.start()
@@ -321,18 +327,18 @@ class ShelfController(
     }
 
     fun show() {
-        if (!added) { 
+        if (!added) {
             wm.addView(root, lp)
-            added = true 
+            added = true
             root.alpha = 1f
             onShownChanged?.invoke(true)
         }
     }
 
     fun hide() {
-        if (added) { 
+        if (added) {
             wm.removeView(root)
-            added = false 
+            added = false
             onShownChanged?.invoke(false)
         }
     }
@@ -340,15 +346,15 @@ class ShelfController(
     fun add(text: String, source: String = "تطبيق") {
         val t = text.trim()
         if (t.isEmpty()) return
-        
+
         if (!added) show()
 
         items.removeAll { it.text == t }
-        val newItem = ShelfItem(t, source)
-        items.add(0, newItem)
-        
+        items.add(0, ShelfItem(t, source))
+        while (items.size > AppConfig.MAX_HISTORY_ITEMS) items.removeAt(items.size - 1)
+
         render()
-        setExpanded(true) 
+        setExpanded(true)
     }
 
     fun setExpanded(on: Boolean) {
@@ -356,8 +362,9 @@ class ShelfController(
         if (on) {
             lp.width = (AppConfig.SHELF_EXPANDED_WIDTH_DP * dp).toInt()
             lp.height = (AppConfig.SHELF_EXPANDED_HEIGHT_DP * dp).toInt()
+            if (lp.y > maxY()) lp.y = maxY()
             scroll.visibility = View.VISIBLE
-            
+
             val params = scroll.layoutParams as FrameLayout.LayoutParams
             params.topMargin = (40 * dp).toInt()
             scroll.layoutParams = params
@@ -377,7 +384,7 @@ class ShelfController(
         list.removeAllViews()
         if (items.isEmpty()) {
             list.addView(TextView(ctx).apply {
-                text = "الرف فاضي..."
+                text = "الرف فاضي، اسحب نص هنا"
                 setTextColor(AppConfig.CARD_SUBTEXT_COLOR)
                 textSize = 13f
             })
@@ -393,12 +400,12 @@ class ShelfController(
         if (customMenu == null) {
             customMenu = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(AppConfig.MENU_BG_COLOR) 
+                setBackgroundColor(AppConfig.MENU_BG_COLOR)
                 val pad = (10 * dp).toInt()
                 setPadding(pad, pad, pad, pad)
-                y = (50 * dp) 
+                y = (50 * dp)
                 layoutParams = FrameLayout.LayoutParams(
-                    (150 * dp).toInt(), 
+                    (150 * dp).toInt(),
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 )
             }
@@ -440,14 +447,13 @@ class ShelfController(
         customMenu?.visibility = View.GONE
     }
 
-    @SuppressLint("ClickableViewAccessibility")
     private fun buildItem(item: ShelfItem): LinearLayout {
         val card = LinearLayout(ctx)
-        card.orientation = LinearLayout.HORIZONTAL 
+        card.orientation = LinearLayout.HORIZONTAL
         val pad = (12 * dp).toInt()
         card.setPadding(pad, pad, pad, pad)
-        card.layoutDirection = list.layoutDirection 
-        
+        card.layoutDirection = list.layoutDirection
+
         val cardBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             setColor(AppConfig.CARD_BG_COLOR)
@@ -455,7 +461,7 @@ class ShelfController(
             setStroke((1 * dp).toInt(), AppConfig.SHELF_STROKE_COLOR)
         }
         card.background = cardBg
-        
+
         val params = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -473,12 +479,12 @@ class ShelfController(
         tvText.maxLines = 3
         tvText.setTextColor(AppConfig.CARD_TEXT_COLOR)
         tvText.textSize = 14f
-        tvText.layoutDirection = View.LAYOUT_DIRECTION_LOCALE 
+        tvText.layoutDirection = View.LAYOUT_DIRECTION_LOCALE
         textLayout.addView(tvText)
 
         val dateFormat = SimpleDateFormat("hh:mm a - dd MMM", Locale.getDefault())
         val timeStr = dateFormat.format(Date(item.timestamp))
-        
+
         val tvSource = TextView(ctx)
         tvSource.text = "${item.source} • $timeStr"
         tvSource.setTextColor(AppConfig.CARD_SUBTEXT_COLOR)
@@ -486,17 +492,17 @@ class ShelfController(
         tvSource.setPadding(0, (4 * dp).toInt(), 0, 0)
         tvSource.layoutDirection = View.LAYOUT_DIRECTION_LOCALE
         textLayout.addView(tvSource)
-        
+
         card.addView(textLayout)
 
         val pinBtn = TextView(ctx).apply {
-            text = if (item.isPinned) "⚲" else "⚲" 
+            text = if (item.isPinned) "★" else "☆"
             textSize = 22f
             setPadding((8 * dp).toInt(), 0, 0, 0)
             setTextColor(if (item.isPinned) AppConfig.PIN_ACTIVE_COLOR else AppConfig.ACTION_ICON_COLOR)
             setOnClickListener {
                 item.isPinned = !item.isPinned
-                render() 
+                render()
             }
         }
         card.addView(pinBtn)
@@ -516,17 +522,17 @@ class ShelfController(
             }
         })
 
-        card.setOnTouchListener { v, event ->
+        card.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
             resetAutoClose()
-            false 
+            false
         }
-        
-        card.setOnClickListener { 
+
+        card.setOnClickListener {
             onInsert(item.text)
             setExpanded(false)
         }
-        
+
         card.setOnLongClickListener { v: View ->
             val clip = ClipData.newPlainText("shelf", item.text)
             v.startDragAndDrop(clip, View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL)
