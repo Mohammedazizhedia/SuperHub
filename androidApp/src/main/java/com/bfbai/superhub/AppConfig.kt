@@ -16,9 +16,9 @@ object AppConfig {
     val MENU_TEXT_COLOR: Int = Color.WHITE
     val MENU_DIVIDER_COLOR: Int = Color.parseColor("#4DE1E1") 
 
-    // 🎨 ألوان زرار التثبيت (Pin)
+    // 🎨 ألوان زراير الرف (اللصق والتثبيت) - خطية وبألوان التطبيق
+    val ACTION_ICON_COLOR: Int = Color.parseColor("#4DE1E1") // سماوي زي حدود الرف
     val PIN_ACTIVE_COLOR: Int = Color.parseColor("#FFD700") // ذهبي لما يكون مثبت
-    val PIN_INACTIVE_COLOR: Int = Color.parseColor("#99FFFFFF") // أبيض شفاف لما يكون مش مثبت
 
     // 📏 الحجم
     val SHELF_CLOSED_WIDTH_DP: Float = 14f 
@@ -27,8 +27,8 @@ object AppConfig {
     val SHELF_EXPANDED_HEIGHT_DP: Float = 320f
     val SHELF_CORNER_RADIUS_DP: Float = 16f
 
-    // ⏱️ الوقت
-    val AUTO_CLOSE_DELAY_MS: Long = 5000
+    // ⏱️ الوقت (رجعناها 5 ثواني زي ما طلبت)
+    val AUTO_CLOSE_DELAY_MS: Long = 5000 
     val DOUBLE_TAP_TIMEOUT_MS: Long = 300
 
     // 🗂️ الهيستوري
