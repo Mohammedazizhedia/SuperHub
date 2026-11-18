@@ -50,6 +50,7 @@ class ShelfController(
     private var expanded: Boolean = false
     private var added: Boolean = false
     private var isRightSide: Boolean = true
+    private var dropped: Boolean = false // عشان الإفلات
 
     var onShownChanged: ((Boolean) -> Unit)? = null
     val isShown: Boolean get() = added
@@ -167,10 +168,12 @@ class ShelfController(
                             isDragging = true
                             autoCloseHandler.removeCallbacks(longPressRunnable)
                             
-                            lp.x = initialX + deltaX
-                            lp.y = (initialY + deltaY).coerceIn(0, ctx.resources.displayMetrics.heightPixels - lp.height)
-                            if (added) wm.updateViewLayout(root, lp)
+                            // التعديل هنا: تصحيح الاتجاه بناءً على الجانب
+                            lp.x = if (isRightSide) (initialX - deltaX).coerceAtLeast(0) else (initialX + deltaX).coerceAtLeast(0)
+                            val maxY = maxOf(0, ctx.resources.displayMetrics.heightPixels - lp.height)
+                            lp.y = (initialY + deltaY).coerceIn(0, maxY)
                             
+                            if (added) wm.updateViewLayout(root, lp)
                             resetAutoClose()
                         }
                         return true
@@ -184,7 +187,8 @@ class ShelfController(
                             val screenWidth = ctx.resources.displayMetrics.widthPixels
                             val midPoint = screenWidth / 2
                             
-                            if (lp.x + (lp.width / 2) > midPoint) {
+                            // التعديل هنا: الاعتماد على مكان الصباع
+                            if (event.rawX > midPoint) {
                                 lp.gravity = Gravity.TOP or Gravity.END
                                 isRightSide = true
                                 list.layoutDirection = View.LAYOUT_DIRECTION_RTL 
@@ -208,11 +212,9 @@ class ShelfController(
                         return true
                     }
                     MotionEvent.ACTION_OUTSIDE -> {
-                        if (customMenu?.visibility == View.VISIBLE) {
-                            hideCustomMenu()
-                        } else {
-                            setExpanded(false)
-                        }
+                        // التعديل هنا: منع التحديث المتكرر
+                        if (customMenu?.visibility == View.VISIBLE) hideCustomMenu()
+                        else if (expanded) setExpanded(false)
                         return true
                     }
                 }
@@ -258,21 +260,28 @@ class ShelfController(
         readClipboardNow { add(it, "لصق مباشر") }
     }
 
+    // التعديل هنا: إصلاح الإفلات
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
                 val hasText = e.clipDescription?.hasMimeType("text/*") == true
-                if (hasText) setExpanded(true)
+                if (hasText) {
+                    dropped = false
+                    setExpanded(true)
+                }
                 return hasText
             }
             DragEvent.ACTION_DROP -> {
+                dropped = true
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { add(it, "تطبيق") }
+                        cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { add(it, "سحب") }
                     }
                 }
             }
-            DragEvent.ACTION_DRAG_ENDED -> setExpanded(false)
+            DragEvent.ACTION_DRAG_ENDED -> {
+                if (!dropped) setExpanded(false) else resetAutoClose()
+            }
         }
         return true
     }
