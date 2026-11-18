@@ -8,7 +8,6 @@ import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -25,6 +24,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import com.bfbai.superhub.AppConfig
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -50,6 +50,10 @@ class ShelfController(
     private var expanded: Boolean = false
     private var added: Boolean = false
     private var isRightSide: Boolean = true
+
+    // متغيرات لمراقبة حالة الستارة من الخارج
+    var onShownChanged: ((Boolean) -> Unit)? = null
+    val isShown: Boolean get() = added
 
     private val autoCloseHandler = Handler(Looper.getMainLooper())
     private val autoCloseRunnable = Runnable { setExpanded(false) }
@@ -85,6 +89,9 @@ class ShelfController(
         
         scroll.addView(list)
         scroll.visibility = View.GONE
+
+        // التعديل: تجديد العداد مع أي لمسة جوه السكرول
+        scroll.setOnTouchListener { _, _ -> resetAutoClose(); false }
         
         topBar.orientation = LinearLayout.HORIZONTAL
         topBar.setPadding(pad, pad, pad, 0)
@@ -98,7 +105,7 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
-        // زرار اللصق (بيقرا الحافظة مباشرة)
+        // زرار اللصق
         val pasteBtn = TextView(ctx).apply {
             text = "⎘" 
             textSize = 24f
@@ -106,14 +113,7 @@ class ShelfController(
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener { 
                 if (!expanded) setExpanded(true)
-                val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                val clip = clipboard.primaryClip
-                if (clip != null && clip.itemCount > 0) {
-                    val text = clip.getItemAt(0).text?.toString()
-                    if (!text.isNullOrEmpty()) {
-                        add(text, "لصق مباشر")
-                    }
-                }
+                readClipboardNow { text -> add(text, "لصق مباشر") }
             }
         }
 
@@ -158,7 +158,8 @@ class ShelfController(
                         initialTouchY = event.rawY
                         isDragging = false
                         isLongPressed = false
-                        autoCloseHandler.removeCallbacks(autoCloseRunnable)
+                        
+                        resetAutoClose() // تجديد العداد
                         autoCloseHandler.postDelayed(longPressRunnable, 600)
                         return true
                     }
@@ -173,6 +174,8 @@ class ShelfController(
                             lp.x = initialX + deltaX
                             lp.y = (initialY + deltaY).coerceIn(0, ctx.resources.displayMetrics.heightPixels - lp.height)
                             if (added) wm.updateViewLayout(root, lp)
+                            
+                            resetAutoClose()
                         }
                         return true
                     }
@@ -224,6 +227,37 @@ class ShelfController(
         root.setOnDragListener { _, e -> handleDrag(e) }
     }
 
+    private fun resetAutoClose() {
+        autoCloseHandler.removeCallbacks(autoCloseRunnable)
+        if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, AppConfig.AUTO_CLOSE_DELAY_MS)
+    }
+
+    private fun readClipboardNow(onText: (String) -> Unit) {
+        if (!added) return
+        lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        try {
+            wm.updateViewLayout(root, lp)
+        } catch (e: Exception) {
+            return
+        }
+        root.postDelayed({
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val t = cm.primaryClip?.takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)?.coerceToText(ctx)?.toString()
+            lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            if (added) {
+                try {
+                    wm.updateViewLayout(root, lp)
+                } catch (e: Exception) {
+                    // تجاهل
+                }
+            }
+            if (t.isNullOrBlank()) {
+                Toast.makeText(ctx, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
+            } else onText(t)
+        }, 250)
+    }
+
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
@@ -234,7 +268,8 @@ class ShelfController(
             DragEvent.ACTION_DROP -> {
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        cd.getItemAt(i).text?.toString()?.let { add(it, "تطبيق") }
+                        // التعديل: استخدام coerceToText عشان الإفلات يرجع نص
+                        cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { add(it, "تطبيق") }
                     }
                 }
             }
@@ -257,11 +292,7 @@ class ShelfController(
                 hide()
                 root.alpha = 1f
                 lp.y = 400
-                
-                // إرسال إشارة للكونترول بانل إن الستارة اختفت
-                val intent = Intent(ctx, ClipboardAccessibilityService::class.java)
-                intent.action = "SHELF_HIDDEN"
-                ctx.startService(intent)
+                // تم إزالة startService من هنا بناءً على طلبك
             }
         })
         anim.start()
@@ -287,11 +318,16 @@ class ShelfController(
             wm.addView(root, lp)
             added = true 
             root.alpha = 1f
+            onShownChanged?.invoke(true)
         }
     }
 
     fun hide() {
-        if (added) { wm.removeView(root); added = false }
+        if (added) { 
+            wm.removeView(root)
+            added = false 
+            onShownChanged?.invoke(false)
+        }
     }
 
     fun add(text: String, source: String = "تطبيق") {
@@ -319,8 +355,7 @@ class ShelfController(
             params.topMargin = (40 * dp).toInt()
             scroll.layoutParams = params
 
-            autoCloseHandler.removeCallbacks(autoCloseRunnable)
-            autoCloseHandler.postDelayed(autoCloseRunnable, AppConfig.AUTO_CLOSE_DELAY_MS)
+            resetAutoClose()
         } else {
             lp.width = (AppConfig.SHELF_CLOSED_WIDTH_DP * dp).toInt()
             lp.height = (AppConfig.SHELF_CLOSED_HEIGHT_DP * dp).toInt()
@@ -447,7 +482,6 @@ class ShelfController(
         
         card.addView(textLayout)
 
-        // زرار التثبيت (رمز نصي مع تغيير اللون)
         val pinBtn = TextView(ctx).apply {
             text = if (item.isPinned) "⚲" else "⚲" 
             textSize = 22f
@@ -477,6 +511,7 @@ class ShelfController(
 
         card.setOnTouchListener { v, event ->
             gestureDetector.onTouchEvent(event)
+            resetAutoClose() // تجديد العداد مع أي لمسة على الكارت
             false 
         }
         
