@@ -12,6 +12,7 @@ import android.service.quicksettings.TileService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
 
 class ClipboardAccessibilityService : AccessibilityService() {
@@ -49,9 +50,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
         if (shelf == null) {
             shelf = ShelfController(this) { insertIntoFocused(it) }
+            shelf?.appNameProvider = { getAppName() }
 
             shelf?.onShownChanged = { shown ->
                 updatePrefs(shown)
+                SuperHubTileService.live?.refresh()
                 TileService.requestListeningState(
                     this, ComponentName(this, SuperHubTileService::class.java)
                 )
@@ -99,8 +102,20 @@ class ClipboardAccessibilityService : AccessibilityService() {
         prefs.edit().putBoolean("shelf_visible", isVisible).apply()
     }
 
+    private fun currentForegroundPackage(): String? {
+        return try {
+            val w = windows.firstOrNull {
+                it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isActive
+            }
+            val p = w?.root?.packageName?.toString()
+            if (p != null && p != packageName) p else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     private fun getAppName(): String {
-        val p = lastApp ?: return "تطبيق"
+        val p = lastApp ?: currentForegroundPackage() ?: return "تطبيق"
         return try {
             val appInfo = packageManager.getApplicationInfo(p, 0)
             packageManager.getApplicationLabel(appInfo).toString()
