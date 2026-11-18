@@ -27,8 +27,8 @@ object AppConfig {
     val SHELF_EXPANDED_HEIGHT_DP: Float = 320f
     val SHELF_CORNER_RADIUS_DP: Float = 16f
 
-    // ⏱️ الوقت (رجعناها 5 ثواني زي ما طلبت)
-    val AUTO_CLOSE_DELAY_MS: Long = 5000 
+    // ⏱️ الوقت (10 ثواني زي ما طلبت)
+    val AUTO_CLOSE_DELAY_MS: Long = 10000 
     val DOUBLE_TAP_TIMEOUT_MS: Long = 300
 
     // 🗂️ الهيستوري
