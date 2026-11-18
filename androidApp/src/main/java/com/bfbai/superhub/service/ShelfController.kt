@@ -6,7 +6,6 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -24,13 +23,12 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import android.widget.Toast
+import com.bfbai.superhub.utils.HistoryManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
-// نموذج البيانات للعنصر المحفوظ
 data class ShelfItem(
     val text: String,
     val source: String,
@@ -46,6 +44,9 @@ class ShelfController(
     private val wm: WindowManager = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val dp: Float = ctx.resources.displayMetrics.density
     private val items: ArrayList<ShelfItem> = ArrayList()
+    
+    // إضافة مدير الحفظ
+    private val historyManager = HistoryManager(ctx)
 
     private var expanded: Boolean = false
     private var added: Boolean = false
@@ -66,10 +67,9 @@ class ShelfController(
 
     private var customMenu: LinearLayout? = null
 
-    // إعدادات النافذة العائمة
     private val lp: WindowManager.LayoutParams = WindowManager.LayoutParams(
-        (24 * dp).toInt(), // العرض عند الطي
-        (160 * dp).toInt(), // الارتفاع عند الطي
+        (24 * dp).toInt(),
+        (160 * dp).toInt(),
         WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
@@ -97,7 +97,6 @@ class ShelfController(
         topBar.setPadding(pad, pad, pad, 0)
         topBar.layoutDirection = View.LAYOUT_DIRECTION_RTL
 
-        // 1. عنوان التطبيق
         val title = TextView(ctx).apply {
             text = "HubSync"
             setTextColor(Color.WHITE)
@@ -106,32 +105,31 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
 
-        // 2. زر القائمة (تم إصلاحه ليفتح ويغلق)
         val menuBtn = TextView(ctx).apply {
             text = "⋮⋮"
             setTextColor(Color.WHITE)
             textSize = 20f
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener {
-                if (customMenu?.visibility == View.VISIBLE) {
-                    hideCustomMenu()
-                } else {
-                    showCustomMenu()
-                }
+                if (customMenu?.visibility == View.VISIBLE) hideCustomMenu() else showCustomMenu()
             }
         }
 
         topBar.addView(title)
-        // تم إزالة زر اللصق (⎘) تماماً كما طلبت
         topBar.addView(menuBtn)
 
         root.addView(topBar)
         root.addView(scroll)
         topBar.visibility = View.GONE
 
+        // تحميل العناصر المحفوظة عند بدء التشغيل
+        val savedItems = historyManager.loadHistory()
+        if (savedItems.isNotEmpty()) {
+            items.addAll(savedItems)
+        }
+
         render()
 
-        // معالجة اللمس والسحب للستارة
         root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -228,7 +226,7 @@ class ShelfController(
 
     private fun resetAutoClose() {
         autoCloseHandler.removeCallbacks(autoCloseRunnable)
-        if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, 10000) // 10 ثواني إغلاق تلقائي
+        if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, 10000)
     }
 
     private fun handleDrag(e: DragEvent): Boolean {
@@ -282,13 +280,13 @@ class ShelfController(
         val radius = 12f * dp
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor("#E6202124")) // لون خلفية شفاف داكن
+            setColor(Color.parseColor("#E6202124"))
             if (isRightSide) {
                 cornerRadii = floatArrayOf(radius, radius, 0f, 0f, 0f, 0f, radius, radius)
             } else {
                 cornerRadii = floatArrayOf(0f, 0f, radius, radius, radius, radius, 0f, 0f)
             }
-            setStroke((1 * dp).toInt(), Color.parseColor("#402196F3")) // حدود زرقاء خفيفة
+            setStroke((1 * dp).toInt(), Color.parseColor("#402196F3"))
         }
         root.background = bg
     }
@@ -319,10 +317,11 @@ class ShelfController(
         items.removeAll { it.text == t }
         items.add(0, ShelfItem(t, source))
         
-        // الاحتفاظ بآخر 100 عنصر فقط لتوفير الذاكرة
         while (items.size > 100) items.removeAt(items.size - 1)
 
         render()
+        // حفظ فوري بعد كل إضافة
+        historyManager.saveHistory(items)
         setExpanded(true)
     }
 
@@ -392,7 +391,6 @@ class ShelfController(
                     layoutDirection = View.LAYOUT_DIRECTION_RTL
                     setOnClickListener {
                         if (opt == "إغلاق") setExpanded(false)
-                        // ملاحظة: سنربط "الإعدادات" و "السجل" لاحقاً عند إنشاء شاشاتهما
                         hideCustomMenu()
                     }
                 }
@@ -476,6 +474,7 @@ class ShelfController(
             setOnClickListener {
                 item.isPinned = !item.isPinned
                 render()
+                historyManager.saveHistory(items)
             }
         }
         card.addView(pinBtn)
@@ -488,6 +487,8 @@ class ShelfController(
                     if (!item.isPinned) {
                         items.remove(item)
                         render()
+                        // حفظ بعد الحذف
+                        historyManager.saveHistory(items)
                     }
                     return true
                 }
