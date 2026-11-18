@@ -7,6 +7,7 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -23,6 +24,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import com.bfbai.superhub.ui.HistoryActivity
 import com.bfbai.superhub.utils.HistoryManager
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -44,8 +47,6 @@ class ShelfController(
     private val wm: WindowManager = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val dp: Float = ctx.resources.displayMetrics.density
     private val items: ArrayList<ShelfItem> = ArrayList()
-    
-    // إضافة مدير الحفظ
     private val historyManager = HistoryManager(ctx)
 
     private var expanded: Boolean = false
@@ -122,7 +123,6 @@ class ShelfController(
         root.addView(scroll)
         topBar.visibility = View.GONE
 
-        // تحميل العناصر المحفوظة عند بدء التشغيل
         val savedItems = historyManager.loadHistory()
         if (savedItems.isNotEmpty()) {
             items.addAll(savedItems)
@@ -316,11 +316,10 @@ class ShelfController(
 
         items.removeAll { it.text == t }
         items.add(0, ShelfItem(t, source))
-        
+
         while (items.size > 100) items.removeAt(items.size - 1)
 
         render()
-        // حفظ فوري بعد كل إضافة
         historyManager.saveHistory(items)
         setExpanded(true)
     }
@@ -390,8 +389,23 @@ class ShelfController(
                     setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
                     layoutDirection = View.LAYOUT_DIRECTION_RTL
                     setOnClickListener {
-                        if (opt == "إغلاق") setExpanded(false)
-                        hideCustomMenu()
+                        when (opt) {
+                            "السجل" -> {
+                                hideCustomMenu()
+                                setExpanded(false)
+                                val intent = Intent(ctx, HistoryActivity::class.java)
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                ctx.startActivity(intent)
+                            }
+                            "الإعدادات" -> {
+                                hideCustomMenu()
+                                Toast.makeText(ctx, "شاشة الإعدادات قريباً", Toast.LENGTH_SHORT).show()
+                            }
+                            "إغلاق" -> {
+                                setExpanded(false)
+                                hideCustomMenu()
+                            }
+                        }
                     }
                 }
                 customMenu?.addView(tv)
@@ -487,7 +501,6 @@ class ShelfController(
                     if (!item.isPinned) {
                         items.remove(item)
                         render()
-                        // حفظ بعد الحذف
                         historyManager.saveHistory(items)
                     }
                     return true
