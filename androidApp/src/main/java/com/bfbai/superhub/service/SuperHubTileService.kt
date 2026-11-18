@@ -8,9 +8,20 @@ import android.service.quicksettings.TileService
 
 class SuperHubTileService : TileService() {
 
+    companion object {
+        @Volatile
+        var live: SuperHubTileService? = null
+    }
+
     override fun onStartListening() {
         super.onStartListening()
-        setTile(ClipboardAccessibilityService.instance?.shelfShown == true)
+        live = this
+        refresh()
+    }
+
+    override fun onStopListening() {
+        live = null
+        super.onStopListening()
     }
 
     override fun onClick() {
@@ -23,6 +34,10 @@ class SuperHubTileService : TileService() {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivityAndCollapse(intent)
         }
+    }
+
+    fun refresh() {
+        setTile(ClipboardAccessibilityService.instance?.shelfShown == true)
     }
 
     private fun setTile(on: Boolean) {
