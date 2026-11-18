@@ -17,7 +17,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var lastText: String? = null
     private var shelf: ShelfController? = null
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
-    private var isShelfVisible = true
+    
+    // عشان نتتبع التطبيق اللي في المقدمة
+    private var lastApp: String? = null 
     private var lastAppName: String = "تطبيق" 
 
     override fun onServiceConnected() {
@@ -28,6 +30,15 @@ class ClipboardAccessibilityService : AccessibilityService() {
         
         if (shelf == null) {
             shelf = ShelfController(this) { insertIntoFocused(it) }
+            
+            // هنا بنربط الستارة بالخدمة عشان نحدث اللون
+            shelf?.onShownChanged = { shown ->
+                updatePrefs(shown)
+                // إرسال إشارة للزرار عشان يحدث حالته فوراً
+                val tileIntent = Intent(this, SuperHubTileService::class.java)
+                tileIntent.action = "UPDATE_TILE"
+                startService(tileIntent)
+            }
             shelf?.show()
         }
 
@@ -39,7 +50,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 val text = clip.getItemAt(0).text?.toString()
                 if (!text.isNullOrEmpty() && text != lastText) {
                     lastText = text
-                    // تحديث اسم التطبيق هنا
                     lastAppName = getAppName()
                     shelf?.add(text, lastAppName)
                 }
@@ -52,19 +62,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             "TOGGLE_SHELF" -> {
-                if (isShelfVisible) {
+                if (shelf?.isShown == true) {
                     shelf?.hide()
-                    isShelfVisible = false
                 } else {
                     shelf?.show()
-                    isShelfVisible = true
                 }
-                updatePrefs(isShelfVisible)
-            }
-            "SHELF_HIDDEN" -> {
-                // بتوصلنا لما الستارة تختفي بالضغطة المطولة
-                isShelfVisible = false
-                updatePrefs(isShelfVisible)
             }
             "PASTE_FROM_SHELF" -> {
                 val clip = clipboardManager.primaryClip
@@ -80,18 +82,32 @@ class ClipboardAccessibilityService : AccessibilityService() {
         return super.onStartCommand(intent, flags, startId)
     }
 
-    // عشان نحفظ حالة الستارة ونعرف الكونترول بانل يغير لونه
+    // تتبع التطبيق اللي في المقدمة
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val p = event.packageName?.toString() ?: return
+            if (p != packageName && p != "com.android.systemui" &&
+                !p.contains("inputmethod") && !p.contains("keyboard")) {
+                lastApp = p
+            }
+        }
+    }
+
+    // حفظ حالة الستارة في الـ Prefs
     private fun updatePrefs(isVisible: Boolean) {
         val prefs = getSharedPreferences("SuperHubPrefs", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("shelf_visible", isVisible).apply()
     }
 
+    // جلب اسم التطبيق باستخدام packageManager
     private fun getAppName(): String {
-        val packageName: String? = rootInActiveWindow?.packageName?.toString()
-        if (packageName == null || packageName == "com.bfbai.superhub") {
-            return if (lastAppName != "تطبيق") lastAppName else "تطبيق"
+        val p = lastApp ?: return "تطبيق"
+        return try {
+            val appInfo = packageManager.getApplicationInfo(p, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        } catch (e: Exception) {
+            p.substringAfterLast('.')
         }
-        return packageName.split(".").last().replaceFirstChar { it.uppercase() }
     }
 
     fun insertIntoFocused(text: String) {
@@ -112,8 +128,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
-    
     override fun onInterrupt() {}
 
     override fun onDestroy() {
