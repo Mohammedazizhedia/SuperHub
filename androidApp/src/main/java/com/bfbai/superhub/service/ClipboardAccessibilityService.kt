@@ -12,27 +12,44 @@ import android.service.quicksettings.TileService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
 
 class ClipboardAccessibilityService : AccessibilityService() {
+
+    companion object {
+        @Volatile
+        var instance: ClipboardAccessibilityService? = null
+    }
 
     private lateinit var clipboardManager: ClipboardManager
     private var lastText: String? = null
     private var shelf: ShelfController? = null
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
-    
-    private var lastApp: String? = null 
-    private var lastAppName: String = "تطبيق" 
+
+    private var lastApp: String? = null
+    private var lastAppName: String = "تطبيق"
+
+    val shelfShown: Boolean get() = shelf?.isShown == true
+
+    fun toggleShelf(): Boolean {
+        if (shelf?.isShown == true) shelf?.hide() else shelf?.show()
+        return shelfShown
+    }
+
+    fun pasteFromShelf() {
+        shelf?.pasteFromClipboard()
+    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        instance = this
         Log.d("ClipboardService", "Service Connected")
-        
+
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        
+
         if (shelf == null) {
             shelf = ShelfController(this) { insertIntoFocused(it) }
-            
-            // ربط الستارة بالخدمة لتحديث اللون باستخدام requestListeningState
+
             shelf?.onShownChanged = { shown ->
                 updatePrefs(shown)
                 TileService.requestListeningState(
@@ -43,11 +60,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
 
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
-        
+
         val l = ClipboardManager.OnPrimaryClipChangedListener {
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
-                val text = clip.getItemAt(0).text?.toString()
+                val text = clip.getItemAt(0).coerceToText(this)?.toString()
                 if (!text.isNullOrEmpty() && text != lastText) {
                     lastText = text
                     lastAppName = getAppName()
@@ -61,17 +78,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            "TOGGLE_SHELF" -> {
-                if (shelf?.isShown == true) {
-                    shelf?.hide()
-                } else {
-                    shelf?.show()
-                }
-            }
-            "PASTE_FROM_SHELF" -> {
-                // التعديل: استدعاء الدالة الجديدة من الستارة
-                shelf?.pasteFromClipboard()
-            }
+            "TOGGLE_SHELF" -> toggleShelf()
+            "PASTE_FROM_SHELF" -> pasteFromShelf()
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -102,16 +110,20 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     fun insertIntoFocused(text: String) {
-        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return
-        lastText = text 
+        val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (node == null) {
+            Toast.makeText(this, "اضغط على خانة الكتابة الأول", Toast.LENGTH_SHORT).show()
+            return
+        }
+        lastText = text
         clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
-        
+
         if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
             val old = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
             val s = minOf(node.textSelectionStart.coerceAtLeast(0), old.length)
             val e = minOf(node.textSelectionEnd.coerceAtLeast(s), old.length)
             val merged = old.substring(0, s) + text + old.substring(e)
-            
+
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, merged)
             }
@@ -122,7 +134,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onDestroy() {
-        // التعديل: إلغاء الربط قبل التدمير لمنع الكراش
+        instance = null
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         clipListener = null
         shelf?.onShownChanged = null
