@@ -51,7 +51,6 @@ class ShelfController(
     private var added: Boolean = false
     private var isRightSide: Boolean = true
 
-    // متغيرات لمراقبة حالة الستارة من الخارج
     var onShownChanged: ((Boolean) -> Unit)? = null
     val isShown: Boolean get() = added
 
@@ -89,8 +88,6 @@ class ShelfController(
         
         scroll.addView(list)
         scroll.visibility = View.GONE
-
-        // التعديل: تجديد العداد مع أي لمسة جوه السكرول
         scroll.setOnTouchListener { _, _ -> resetAutoClose(); false }
         
         topBar.orientation = LinearLayout.HORIZONTAL
@@ -105,7 +102,6 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
-        // زرار اللصق
         val pasteBtn = TextView(ctx).apply {
             text = "⎘" 
             textSize = 24f
@@ -159,7 +155,7 @@ class ShelfController(
                         isDragging = false
                         isLongPressed = false
                         
-                        resetAutoClose() // تجديد العداد
+                        resetAutoClose()
                         autoCloseHandler.postDelayed(longPressRunnable, 600)
                         return true
                     }
@@ -248,14 +244,18 @@ class ShelfController(
             if (added) {
                 try {
                     wm.updateViewLayout(root, lp)
-                } catch (e: Exception) {
-                    // تجاهل
-                }
+                } catch (e: Exception) {}
             }
             if (t.isNullOrBlank()) {
                 Toast.makeText(ctx, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
             } else onText(t)
         }, 250)
+    }
+
+    fun pasteFromClipboard() {
+        show()
+        setExpanded(true)
+        readClipboardNow { add(it, "لصق مباشر") }
     }
 
     private fun handleDrag(e: DragEvent): Boolean {
@@ -268,7 +268,6 @@ class ShelfController(
             DragEvent.ACTION_DROP -> {
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        // التعديل: استخدام coerceToText عشان الإفلات يرجع نص
                         cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { add(it, "تطبيق") }
                     }
                 }
@@ -292,7 +291,6 @@ class ShelfController(
                 hide()
                 root.alpha = 1f
                 lp.y = 400
-                // تم إزالة startService من هنا بناءً على طلبك
             }
         })
         anim.start()
@@ -511,7 +509,7 @@ class ShelfController(
 
         card.setOnTouchListener { v, event ->
             gestureDetector.onTouchEvent(event)
-            resetAutoClose() // تجديد العداد مع أي لمسة على الكارت
+            resetAutoClose()
             false 
         }
         
