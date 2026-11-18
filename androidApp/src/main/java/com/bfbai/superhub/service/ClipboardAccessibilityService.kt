@@ -4,9 +4,11 @@ package com.bfbai.superhub.service
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.service.quicksettings.TileService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -18,7 +20,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var shelf: ShelfController? = null
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
     
-    // عشان نتتبع التطبيق اللي في المقدمة
     private var lastApp: String? = null 
     private var lastAppName: String = "تطبيق" 
 
@@ -31,13 +32,12 @@ class ClipboardAccessibilityService : AccessibilityService() {
         if (shelf == null) {
             shelf = ShelfController(this) { insertIntoFocused(it) }
             
-            // هنا بنربط الستارة بالخدمة عشان نحدث اللون
+            // ربط الستارة بالخدمة لتحديث اللون باستخدام requestListeningState
             shelf?.onShownChanged = { shown ->
                 updatePrefs(shown)
-                // إرسال إشارة للزرار عشان يحدث حالته فوراً
-                val tileIntent = Intent(this, SuperHubTileService::class.java)
-                tileIntent.action = "UPDATE_TILE"
-                startService(tileIntent)
+                TileService.requestListeningState(
+                    this, ComponentName(this, SuperHubTileService::class.java)
+                )
             }
             shelf?.show()
         }
@@ -69,20 +69,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 }
             }
             "PASTE_FROM_SHELF" -> {
-                val clip = clipboardManager.primaryClip
-                if (clip != null && clip.itemCount > 0) {
-                    val text = clip.getItemAt(0).text?.toString()
-                    if (!text.isNullOrEmpty()) {
-                        lastText = text
-                        shelf?.add(text, lastAppName)
-                    }
-                }
+                // التعديل: استدعاء الدالة الجديدة من الستارة
+                shelf?.pasteFromClipboard()
             }
         }
         return super.onStartCommand(intent, flags, startId)
     }
 
-    // تتبع التطبيق اللي في المقدمة
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val p = event.packageName?.toString() ?: return
@@ -93,13 +86,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // حفظ حالة الستارة في الـ Prefs
     private fun updatePrefs(isVisible: Boolean) {
         val prefs = getSharedPreferences("SuperHubPrefs", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("shelf_visible", isVisible).apply()
     }
 
-    // جلب اسم التطبيق باستخدام packageManager
     private fun getAppName(): String {
         val p = lastApp ?: return "تطبيق"
         return try {
@@ -131,10 +122,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onDestroy() {
+        // التعديل: إلغاء الربط قبل التدمير لمنع الكراش
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         clipListener = null
+        shelf?.onShownChanged = null
         shelf?.hide()
         shelf = null
+        updatePrefs(false)
         super.onDestroy()
     }
 }
