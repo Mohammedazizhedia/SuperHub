@@ -1,6 +1,7 @@
 // Built with BFB.AI
 package com.bfbai.superhub.service
 
+import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.service.quicksettings.Tile
@@ -22,11 +23,13 @@ class SuperHubTileService : TileService() {
             intent.action = "TOGGLE_SHELF"
             startService(intent)
             
-            // بنغير لون الزرار هنا (Active / Inactive)
-            if (qsTile?.state == Tile.STATE_ACTIVE) {
-                qsTile?.state = Tile.STATE_INACTIVE
-            } else {
+            // تغيير اللون فوراً
+            val prefs = getSharedPreferences("SuperHubPrefs", Context.MODE_PRIVATE)
+            val isVisible = prefs.getBoolean("shelf_visible", true)
+            if (isVisible) {
                 qsTile?.state = Tile.STATE_ACTIVE
+            } else {
+                qsTile?.state = Tile.STATE_INACTIVE
             }
             qsTile?.updateTile()
         } else {
@@ -68,9 +71,16 @@ class SuperHubTileService : TileService() {
 
     private fun updateTileState() {
         val tile: Tile = qsTile ?: return
-        // لما التطبيق يشتغل لأول مرة، بنخلي لونه شغال (أزرق)
         if (isAccessibilityServiceEnabled()) {
-            tile.state = Tile.STATE_ACTIVE
+            // بنقرا الحالة من الـ SharedPreferences
+            val prefs = getSharedPreferences("SuperHubPrefs", Context.MODE_PRIVATE)
+            val isVisible = prefs.getBoolean("shelf_visible", true)
+            
+            if (isVisible) {
+                tile.state = Tile.STATE_ACTIVE
+            } else {
+                tile.state = Tile.STATE_INACTIVE
+            }
         } else {
             tile.state = Tile.STATE_INACTIVE
         }
