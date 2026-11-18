@@ -39,7 +39,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 val text = clip.getItemAt(0).text?.toString()
                 if (!text.isNullOrEmpty() && text != lastText) {
                     lastText = text
-                    // بنجيب اسم التطبيق هنا (هيشتغل في كروم والملاحظات)
+                    // تحديث اسم التطبيق هنا
                     lastAppName = getAppName()
                     shelf?.add(text, lastAppName)
                 }
@@ -59,9 +59,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     shelf?.show()
                     isShelfVisible = true
                 }
+                updatePrefs(isShelfVisible)
+            }
+            "SHELF_HIDDEN" -> {
+                // بتوصلنا لما الستارة تختفي بالضغطة المطولة
+                isShelfVisible = false
+                updatePrefs(isShelfVisible)
             }
             "PASTE_FROM_SHELF" -> {
-                // زرار اللصق: بياخد النص من الحافظة واسم التطبيق اللي كان شغال
                 val clip = clipboardManager.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val text = clip.getItemAt(0).text?.toString()
@@ -73,6 +78,12 @@ class ClipboardAccessibilityService : AccessibilityService() {
             }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    // عشان نحفظ حالة الستارة ونعرف الكونترول بانل يغير لونه
+    private fun updatePrefs(isVisible: Boolean) {
+        val prefs = getSharedPreferences("SuperHubPrefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("shelf_visible", isVisible).apply()
     }
 
     private fun getAppName(): String {
