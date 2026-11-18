@@ -39,6 +39,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 val text = clip.getItemAt(0).text?.toString()
                 if (!text.isNullOrEmpty() && text != lastText) {
                     lastText = text
+                    // بنجيب اسم التطبيق هنا (هيشتغل في كروم والملاحظات)
                     lastAppName = getAppName()
                     shelf?.add(text, lastAppName)
                 }
@@ -60,6 +61,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 }
             }
             "PASTE_FROM_SHELF" -> {
+                // زرار اللصق: بياخد النص من الحافظة واسم التطبيق اللي كان شغال
                 val clip = clipboardManager.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val text = clip.getItemAt(0).text?.toString()
