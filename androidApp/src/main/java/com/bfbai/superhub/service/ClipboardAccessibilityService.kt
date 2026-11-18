@@ -4,11 +4,9 @@ package com.bfbai.superhub.service
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.service.quicksettings.TileService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -24,11 +22,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     private lateinit var clipboardManager: ClipboardManager
     private var lastText: String? = null
-    private var shelf: ShelfController? = null
+    
+    // تم تغييره إلى internal ليتم الوصول إليه من ShareReceiverActivity
+    internal var shelf: ShelfController? = null 
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
     private var lastApp: String? = null
     private var lastAppName: String = "تطبيق"
+    private var lastCopyApp: String? = null
     private var ignoreClipUntil: Long = 0L
 
     val shelfShown: Boolean get() = shelf?.isShown == true
@@ -38,8 +39,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
         return shelfShown
     }
 
-    fun pasteFromShelf() {
-        shelf?.pasteFromClipboard()
+    // دالة عامة جديدة لإضافة عنصر من خارج الخدمة (مثل ShareReceiverActivity)
+    fun addToShelf(text: String, source: String) {
+        shelf?.add(text, source)
     }
 
     override fun onServiceConnected() {
@@ -51,14 +53,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
         if (shelf == null) {
             shelf = ShelfController(this) { insertIntoFocused(it) }
-            shelf?.appNameProvider = { getAppName() }
+            shelf?.appNameProvider = { lastCopyApp ?: getAppName() }
 
             shelf?.onShownChanged = { shown ->
                 updatePrefs(shown)
-                SuperHubTileService.live?.refresh()
-                TileService.requestListeningState(
-                    this, ComponentName(this, SuperHubTileService::class.java)
-                )
             }
             shelf?.show()
         }
@@ -67,13 +65,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
         val l = ClipboardManager.OnPrimaryClipChangedListener {
             if (System.currentTimeMillis() < ignoreClipUntil) return@OnPrimaryClipChangedListener
+            lastCopyApp = getAppName()
             try {
                 val clip = clipboardManager.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val text = clip.getItemAt(0).coerceToText(this)?.toString()
                     if (!text.isNullOrBlank()) {
                         lastText = text
-                        lastAppName = getAppName()
+                        lastAppName = lastCopyApp ?: "تطبيق"
                         shelf?.add(text, lastAppName)
                     }
                 }
@@ -88,7 +87,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             "TOGGLE_SHELF" -> toggleShelf()
-            "PASTE_FROM_SHELF" -> pasteFromShelf()
         }
         return super.onStartCommand(intent, flags, startId)
     }
@@ -104,7 +102,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     private fun updatePrefs(isVisible: Boolean) {
-        val prefs = getSharedPreferences("SuperHubPrefs", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("HubSyncPrefs", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("shelf_visible", isVisible).apply()
     }
 
@@ -136,7 +134,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
             return
         }
         ignoreClipUntil = System.currentTimeMillis() + 1000
-        clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
+        clipboardManager.setPrimaryClip(ClipData.newPlainText("hubsync", text))
+        lastCopyApp = null
 
         if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
             val old = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
