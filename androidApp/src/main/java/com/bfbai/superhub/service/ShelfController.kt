@@ -97,9 +97,11 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
+        // زرار اللصق (شكل خطي)
         val pasteBtn = TextView(ctx).apply {
-            text = "📋"
-            textSize = 18f
+            text = "⎘" 
+            textSize = 24f
+            setTextColor(AppConfig.ACTION_ICON_COLOR)
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener { 
                 if (!expanded) setExpanded(true)
@@ -111,7 +113,7 @@ class ShelfController(
 
         val menuBtn = TextView(ctx).apply {
             text = "⋮⋮"
-            setTextColor(AppConfig.SHELF_STROKE_COLOR)
+            setTextColor(AppConfig.ACTION_ICON_COLOR)
             textSize = 20f
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener { showCustomMenu() }
@@ -126,21 +128,18 @@ class ShelfController(
         
         render()
 
-        root.setOnLongClickListener {
-            animateDisappear()
-            true
-        }
-        topBar.setOnLongClickListener {
-            animateDisappear()
-            true
-        }
-
+        // حساس لمس واحد ذكي (بيفرق بين السحب والضغط والضغط المطول)
         root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
             private var initialTouchY = 0f
             private var isDragging = false
+            private var isLongPressed = false
+            private val longPressRunnable = Runnable {
+                isLongPressed = true
+                animateDisappear()
+            }
 
             override fun onTouch(v: View?, event: MotionEvent?): Boolean {
                 if (event == null) return false
@@ -153,21 +152,38 @@ class ShelfController(
                         initialTouchX = event.rawX
                         initialTouchY = event.rawY
                         isDragging = false
+                        isLongPressed = false
                         autoCloseHandler.removeCallbacks(autoCloseRunnable)
+                        
+                        // بدء مؤقت الضغطة المطولة
+                        autoCloseHandler.postDelayed(longPressRunnable, 600)
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
-                        if (abs(deltaX) > 10 || abs(deltaY) > 10) isDragging = true
                         
-                        lp.x = initialX + deltaX
-                        lp.y = (initialY + deltaY).coerceIn(0, ctx.resources.displayMetrics.heightPixels - lp.height)
-                        if (added) wm.updateViewLayout(root, lp)
+                        // لو اتحرك، يبقى إلغاء الضغطة المطولة ونبدأ السحب
+                        if (abs(deltaX) > 15 || abs(deltaY) > 15) {
+                            isDragging = true
+                            autoCloseHandler.removeCallbacks(longPressRunnable)
+                            
+                            lp.x = initialX + deltaX
+                            lp.y = (initialY + deltaY).coerceIn(0, ctx.resources.displayMetrics.heightPixels - lp.height)
+                            if (added) wm.updateViewLayout(root, lp)
+                        }
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
+                        autoCloseHandler.removeCallbacks(longPressRunnable)
+                        
+                        if (isLongPressed) {
+                            // تم عمل أنيميشن الاختفاء خلاص
+                            return true
+                        }
+                        
                         if (isDragging) {
+                            // تثبيت الحافة
                             val screenWidth = ctx.resources.displayMetrics.widthPixels
                             val midPoint = screenWidth / 2
                             
@@ -186,8 +202,13 @@ class ShelfController(
                             updateBackground() 
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
+                            // ضغطة عادية
                             if (!expanded) setExpanded(true)
                         }
+                        return true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        autoCloseHandler.removeCallbacks(longPressRunnable)
                         return true
                     }
                     MotionEvent.ACTION_OUTSIDE -> {
@@ -428,11 +449,12 @@ class ShelfController(
         
         card.addView(textLayout)
 
+        // زرار التثبيت (شكل خطي)
         val pinBtn = TextView(ctx).apply {
-            text = "📌"
-            textSize = 18f
+            text = "📍" // رمز خطي للدبوس
+            textSize = 20f
             setPadding((8 * dp).toInt(), 0, 0, 0)
-            setTextColor(if (item.isPinned) AppConfig.PIN_ACTIVE_COLOR else AppConfig.PIN_INACTIVE_COLOR)
+            setTextColor(if (item.isPinned) AppConfig.PIN_ACTIVE_COLOR else AppConfig.ACTION_ICON_COLOR)
             setOnClickListener {
                 item.isPinned = !item.isPinned
                 render() 
