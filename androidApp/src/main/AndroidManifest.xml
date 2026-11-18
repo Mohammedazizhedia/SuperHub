@@ -18,9 +18,23 @@
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:label="SuperHub"
+        android:label="HubSync"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+        <!-- Built with BFB.AI: نشاط استقبال المشاركات -->
+        <activity
+            android:name=".ui.ShareReceiverActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="true"
+            android:label="حفظ في HubSync">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
 
         <!-- خدمة الالتقاط والرف -->
         <service
@@ -40,7 +54,7 @@
             android:name=".service.SuperHubTileService"
             android:exported="true"
             android:icon="@android:drawable/ic_menu_edit"
-            android:label="SuperHub"
+            android:label="HubSync"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
@@ -51,7 +65,7 @@
         <activity
             android:name=".ProcessTextActivity"
             android:exported="true"
-            android:label="SuperHub"
+            android:label="HubSync"
             android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.PROCESS_TEXT" />
