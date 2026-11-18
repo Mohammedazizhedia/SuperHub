@@ -97,7 +97,6 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
-        // زرار اللصق (بيفتح الستارة لو مقفولة ويقرا الحافظة)
         val pasteBtn = TextView(ctx).apply {
             text = "📋"
             textSize = 18f
@@ -127,7 +126,6 @@ class ShelfController(
         
         render()
 
-        // الضغطة المطولة عشان تختفي
         root.setOnLongClickListener {
             animateDisappear()
             true
@@ -469,7 +467,7 @@ class ShelfController(
         
         card.setOnLongClickListener { v: View ->
             val clip = ClipData.newPlainText("shelf", item.text)
-            v.startDragAndDrop(clip, View.DragShadowBuilder(v), null, View.DRAG_FLOATING)
+            v.startDragAndDrop(clip, View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL)
         }
         return card
     }
