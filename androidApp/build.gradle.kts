@@ -56,6 +56,7 @@ dependencies {
     implementation(project(":shared"))
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)
+    implementation("com.google.code.gson:gson:2.10.1")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
