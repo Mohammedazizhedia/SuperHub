@@ -281,10 +281,8 @@ class ShelfController(
                 dropped = true
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
-                        // التعديل: استخدام appNameProvider
-                        cd.getItemAt(i).coerceToText(ctx)?.toString()?.let { 
-                            add(it, appNameProvider?.invoke() ?: "سحب") 
-                        }
+                        cd.getItemAt(i).coerceToText(ctx)?.toString()
+                            ?.let { add(it, appNameProvider?.invoke() ?: "سحب") }
                     }
                 }
             }
@@ -356,7 +354,6 @@ class ShelfController(
 
         items.removeAll { it.text == t }
         items.add(0, ShelfItem(t, source))
-        // التعديل: استخدام قيمة من AppConfig بدل الرقم الثابت
         while (items.size > AppConfig.MAX_HISTORY_ITEMS) items.removeAt(items.size - 1)
 
         render()
