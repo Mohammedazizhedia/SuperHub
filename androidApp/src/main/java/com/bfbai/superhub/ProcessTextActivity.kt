@@ -16,12 +16,12 @@ class ProcessTextActivity : Activity() {
         if (intent.action == Intent.ACTION_PROCESS_TEXT) {
             val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
             if (!text.isNullOrEmpty()) {
-                // 1. نحط النص في الحافظة
+                // نسخ النص للحافظة عشان الرف يلتقطه
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = ClipData.newPlainText("shelf", text)
                 clipboard.setPrimaryClip(clip)
                 
-                // 2. نبعت أمر للخدمة عشان تفتح الرف وتقرا من الحافظة فوراً
+                // إرسال أمر للخدمة عشان تفتح الرف وتاخد النص
                 val serviceIntent = Intent(this, com.bfbai.superhub.service.ClipboardAccessibilityService::class.java)
                 serviceIntent.action = "ADD_FROM_PROCESS_TEXT"
                 startService(serviceIntent)
