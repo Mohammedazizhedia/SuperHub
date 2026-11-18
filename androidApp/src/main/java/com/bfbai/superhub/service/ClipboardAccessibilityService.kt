@@ -29,6 +29,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     private var lastApp: String? = null
     private var lastAppName: String = "تطبيق"
+    
+    // التعديل: متغير لمنع صدى اللصق
+    private var ignoreClipUntil: Long = 0L
 
     val shelfShown: Boolean get() = shelf?.isShown == true
 
@@ -64,15 +67,21 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
 
+        // التعديل: الـ Listener الجديد
         val l = ClipboardManager.OnPrimaryClipChangedListener {
-            val clip = clipboardManager.primaryClip
-            if (clip != null && clip.itemCount > 0) {
-                val text = clip.getItemAt(0).coerceToText(this)?.toString()
-                if (!text.isNullOrEmpty() && text != lastText) {
-                    lastText = text
-                    lastAppName = getAppName()
-                    shelf?.add(text, lastAppName)
+            if (System.currentTimeMillis() < ignoreClipUntil) return@OnPrimaryClipChangedListener
+            try {
+                val clip = clipboardManager.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).coerceToText(this)?.toString()
+                    if (!text.isNullOrBlank()) {
+                        lastText = text
+                        lastAppName = getAppName()
+                        shelf?.add(text, lastAppName)
+                    }
                 }
+            } catch (e: Exception) {
+                Log.d("ClipboardService", "clip read failed: ${e.message}")
             }
         }
         clipListener = l
@@ -102,11 +111,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
         prefs.edit().putBoolean("shelf_visible", isVisible).apply()
     }
 
+    // التعديل: جلب التطبيق الأمامي
     private fun currentForegroundPackage(): String? {
         return try {
-            val w = windows.firstOrNull {
-                it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isActive
-            }
+            val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            val w = apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
             val p = w?.root?.packageName?.toString()
             if (p != null && p != packageName) p else null
         } catch (e: Exception) {
@@ -114,8 +123,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
+    // التعديل: استخدام الدالة الجديدة
     private fun getAppName(): String {
-        val p = lastApp ?: currentForegroundPackage() ?: return "تطبيق"
+        val p = currentForegroundPackage() ?: lastApp ?: return "تطبيق"
         return try {
             val appInfo = packageManager.getApplicationInfo(p, 0)
             packageManager.getApplicationLabel(appInfo).toString()
@@ -130,6 +140,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
             Toast.makeText(this, "اضغط على خانة الكتابة الأول", Toast.LENGTH_SHORT).show()
             return
         }
+        // التعديل: منع صدى النسخ
+        ignoreClipUntil = System.currentTimeMillis() + 1000
         lastText = text
         clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
 
