@@ -32,5 +32,5 @@ object AppConfig {
     val DOUBLE_TAP_TIMEOUT_MS: Long = 300
 
     // أقصى عدد عناصر في الرف
-    val MAX_HISTORY_ITEMS: Int = 30
+    val MAX_HISTORY_ITEMS: Int = 50
 }
