@@ -53,6 +53,7 @@ class ShelfController(
     private var dropped: Boolean = false
 
     var onShownChanged: ((Boolean) -> Unit)? = null
+    var appNameProvider: (() -> String)? = null
     val isShown: Boolean get() = added
 
     private val autoCloseHandler = Handler(Looper.getMainLooper())
@@ -110,7 +111,7 @@ class ShelfController(
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener {
                 if (!expanded) setExpanded(true)
-                readClipboardNow { text -> add(text, "لصق مباشر") }
+                readClipboardNow { text -> add(text, appNameProvider?.invoke() ?: "لصق مباشر") }
             }
         }
 
@@ -128,6 +129,7 @@ class ShelfController(
 
         root.addView(topBar)
         root.addView(scroll)
+        topBar.visibility = View.GONE
 
         render()
 
@@ -262,7 +264,7 @@ class ShelfController(
     fun pasteFromClipboard() {
         show()
         setExpanded(true)
-        readClipboardNow { add(it, "لصق مباشر") }
+        readClipboardNow { add(it, appNameProvider?.invoke() ?: "لصق مباشر") }
     }
 
     private fun handleDrag(e: DragEvent): Boolean {
@@ -360,6 +362,7 @@ class ShelfController(
     fun setExpanded(on: Boolean) {
         expanded = on
         if (on) {
+            topBar.visibility = View.VISIBLE
             lp.width = (AppConfig.SHELF_EXPANDED_WIDTH_DP * dp).toInt()
             lp.height = (AppConfig.SHELF_EXPANDED_HEIGHT_DP * dp).toInt()
             if (lp.y > maxY()) lp.y = maxY()
@@ -371,6 +374,7 @@ class ShelfController(
 
             resetAutoClose()
         } else {
+            topBar.visibility = View.GONE
             lp.width = (AppConfig.SHELF_CLOSED_WIDTH_DP * dp).toInt()
             lp.height = (AppConfig.SHELF_CLOSED_HEIGHT_DP * dp).toInt()
             scroll.visibility = View.GONE
@@ -397,6 +401,7 @@ class ShelfController(
     }
 
     private fun showCustomMenu() {
+        if (!expanded) return
         if (customMenu == null) {
             customMenu = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
