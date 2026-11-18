@@ -2,6 +2,8 @@
 package com.bfbai.superhub.service
 
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
@@ -13,10 +15,16 @@ class SuperHubTileService : TileService() {
         var live: SuperHubTileService? = null
     }
 
+    override fun onTileAdded() {
+        super.onTileAdded()
+        refresh()
+    }
+
     override fun onStartListening() {
         super.onStartListening()
         live = this
         refresh()
+        Handler(Looper.getMainLooper()).postDelayed({ refresh() }, 300)
     }
 
     override fun onStopListening() {
