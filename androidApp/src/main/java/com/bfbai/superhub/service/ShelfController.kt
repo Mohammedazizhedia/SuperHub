@@ -6,6 +6,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -97,7 +98,7 @@ class ShelfController(
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         
-        // زرار اللصق (شكل خطي)
+        // زرار اللصق (بيقرا الحافظة مباشرة)
         val pasteBtn = TextView(ctx).apply {
             text = "⎘" 
             textSize = 24f
@@ -105,9 +106,14 @@ class ShelfController(
             setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
             setOnClickListener { 
                 if (!expanded) setExpanded(true)
-                val intent = Intent(ctx, ClipboardAccessibilityService::class.java)
-                intent.action = "PASTE_FROM_SHELF"
-                ctx.startService(intent)
+                val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0).text?.toString()
+                    if (!text.isNullOrEmpty()) {
+                        add(text, "لصق مباشر")
+                    }
+                }
             }
         }
 
@@ -128,7 +134,6 @@ class ShelfController(
         
         render()
 
-        // حساس لمس واحد ذكي (بيفرق بين السحب والضغط والضغط المطول)
         root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
             private var initialY = 0
@@ -154,8 +159,6 @@ class ShelfController(
                         isDragging = false
                         isLongPressed = false
                         autoCloseHandler.removeCallbacks(autoCloseRunnable)
-                        
-                        // بدء مؤقت الضغطة المطولة
                         autoCloseHandler.postDelayed(longPressRunnable, 600)
                         return true
                     }
@@ -163,7 +166,6 @@ class ShelfController(
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
                         
-                        // لو اتحرك، يبقى إلغاء الضغطة المطولة ونبدأ السحب
                         if (abs(deltaX) > 15 || abs(deltaY) > 15) {
                             isDragging = true
                             autoCloseHandler.removeCallbacks(longPressRunnable)
@@ -177,13 +179,9 @@ class ShelfController(
                     MotionEvent.ACTION_UP -> {
                         autoCloseHandler.removeCallbacks(longPressRunnable)
                         
-                        if (isLongPressed) {
-                            // تم عمل أنيميشن الاختفاء خلاص
-                            return true
-                        }
+                        if (isLongPressed) return true
                         
                         if (isDragging) {
-                            // تثبيت الحافة
                             val screenWidth = ctx.resources.displayMetrics.widthPixels
                             val midPoint = screenWidth / 2
                             
@@ -202,7 +200,6 @@ class ShelfController(
                             updateBackground() 
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
-                            // ضغطة عادية
                             if (!expanded) setExpanded(true)
                         }
                         return true
@@ -260,6 +257,11 @@ class ShelfController(
                 hide()
                 root.alpha = 1f
                 lp.y = 400
+                
+                // إرسال إشارة للكونترول بانل إن الستارة اختفت
+                val intent = Intent(ctx, ClipboardAccessibilityService::class.java)
+                intent.action = "SHELF_HIDDEN"
+                ctx.startService(intent)
             }
         })
         anim.start()
@@ -290,10 +292,6 @@ class ShelfController(
 
     fun hide() {
         if (added) { wm.removeView(root); added = false }
-    }
-
-    fun toggleVisibility() {
-        if (added) hide() else show()
     }
 
     fun add(text: String, source: String = "تطبيق") {
@@ -449,10 +447,10 @@ class ShelfController(
         
         card.addView(textLayout)
 
-        // زرار التثبيت (شكل خطي)
+        // زرار التثبيت (رمز نصي مع تغيير اللون)
         val pinBtn = TextView(ctx).apply {
-            text = "📍" // رمز خطي للدبوس
-            textSize = 20f
+            text = if (item.isPinned) "⚲" else "⚲" 
+            textSize = 22f
             setPadding((8 * dp).toInt(), 0, 0, 0)
             setTextColor(if (item.isPinned) AppConfig.PIN_ACTIVE_COLOR else AppConfig.ACTION_ICON_COLOR)
             setOnClickListener {
