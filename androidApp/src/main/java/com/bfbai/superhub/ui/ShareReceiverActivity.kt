@@ -5,17 +5,17 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
 import com.bfbai.superhub.service.ClipboardAccessibilityService
 import com.bfbai.superhub.service.ShelfItem
 import com.bfbai.superhub.utils.HistoryManager
 import java.io.File
 import java.io.FileOutputStream
 
-class ShareReceiverActivity : AppCompatActivity() {
+class ShareReceiverActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // جعل النافذة شفافة تماماً حتى لا يلاحظ المستخدم أي وميض
+        // جعل النافذة شفافة تماماً
         window.setBackgroundDrawableResource(android.R.color.transparent)
         handleIntent(intent)
         finish() // إغلاق النشاط فوراً بعد المعالجة
@@ -44,9 +44,8 @@ class ShareReceiverActivity : AppCompatActivity() {
     private fun addToShelf(text: String, source: String) {
         val service = ClipboardAccessibilityService.instance
         if (service != null) {
-            service.shelf?.add(text, source)
+            service.addToShelf(text, source)
         } else {
-            // إذا كانت الخدمة غير نشطة، نحفظها مباشرة في السجل
             val historyManager = HistoryManager(this)
             val items = historyManager.loadHistory().toMutableList()
             items.add(0, ShelfItem(text, source))
