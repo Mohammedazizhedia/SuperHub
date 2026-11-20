@@ -1,74 +1,48 @@
 // Built with BFB.AI
 package com.bfbai.superhub.ui
 
+import android.app.Activity
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
-import androidx.activity.ComponentActivity
-import com.bfbai.superhub.service.ClipboardAccessibilityService
-import com.bfbai.superhub.service.ShelfItem
-import com.bfbai.superhub.utils.HistoryManager
-import java.io.File
-import java.io.FileOutputStream
+import com.bfbai.superhub.utils.HistoryRepository
 
-class ShareReceiverActivity : ComponentActivity() {
+class ShareReceiverActivity : Activity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // جعل النافذة شفافة تماماً
-        window.setBackgroundDrawableResource(android.R.color.transparent)
-        handleIntent(intent)
-        finish() // إغلاق النشاط فوراً بعد المعالجة
-    }
+        HistoryRepository.init(this)
 
-    private fun handleIntent(intent: Intent?) {
-        if (intent == null) return
-        val action = intent.action
-        val type = intent.type
-
-        if (Intent.ACTION_SEND == action && type != null) {
-            if (type.startsWith("text/")) {
-                val text = intent.getStringExtra(Intent.EXTRA_TEXT)
-                if (!text.isNullOrBlank()) {
-                    addToShelf(text, "مشاركة نص")
-                }
-            } else if (type.startsWith("image/")) {
-                val imageUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-                if (imageUri != null) {
-                    saveImageAndAddToShelf(imageUri)
-                }
+        val i: Intent? = intent
+        val text: String? =
+            if (i?.action == Intent.ACTION_SEND && i.type?.startsWith("text/") == true) {
+                i.getStringExtra(Intent.EXTRA_TEXT)
+            } else {
+                null
             }
+
+        if (text.isNullOrBlank()) {
+            Toast.makeText(this, "مفيش نص أحفظه (الصور لسه مش مدعومة)", Toast.LENGTH_SHORT).show()
+            finish()
+            return
         }
+
+        HistoryRepository.add(text, sourceName())
+        Toast.makeText(this, "اتحفظ في HubSync", Toast.LENGTH_SHORT).show()
+
+        // تأخير بسيط عشان الحفظ في الملف يلحق يخلص قبل ما العملية تتقفل
+        Handler(Looper.getMainLooper()).postDelayed({ finish() }, 600)
     }
 
-    private fun addToShelf(text: String, source: String) {
-        val service = ClipboardAccessibilityService.instance
-        if (service != null) {
-            service.addToShelf(text, source)
-        } else {
-            val historyManager = HistoryManager(this)
-            val items = historyManager.loadHistory().toMutableList()
-            items.add(0, ShelfItem(text, source))
-            historyManager.saveHistory(items)
-            Toast.makeText(this, "تم الحفظ في HubSync", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun saveImageAndAddToShelf(uri: Uri) {
-        try {
-            val fileName = "IMG_${System.currentTimeMillis()}.jpg"
-            val directory = File(getExternalFilesDir(null), "HubSyncImages")
-            if (!directory.exists()) directory.mkdirs()
-            
-            val file = File(directory, fileName)
-            contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(file).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            addToShelf("[صورة محفوظة: $fileName]", "صورة مشاركة")
+    private fun sourceName(): String {
+        val pkg: String? = referrer?.host
+        if (pkg.isNullOrBlank() || pkg == packageName) return "مشاركة"
+        return try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
         } catch (e: Exception) {
-            Toast.makeText(this, "فشل حفظ الصورة", Toast.LENGTH_SHORT).show()
+            "مشاركة"
         }
     }
 }
