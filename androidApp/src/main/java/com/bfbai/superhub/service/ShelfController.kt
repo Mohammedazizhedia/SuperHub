@@ -27,6 +27,11 @@ import android.widget.TextView
 import android.widget.Toast
 import com.bfbai.superhub.ui.HistoryActivity
 import com.bfbai.superhub.utils.HistoryManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -49,14 +54,20 @@ class ShelfController(
     private val items: ArrayList<ShelfItem> = ArrayList()
     private val historyManager = HistoryManager(ctx)
 
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(Dispatchers.Main + job)
+
     private var expanded: Boolean = false
     private var added: Boolean = false
+    private var userHidden: Boolean = false
+    private var dragFromHidden: Boolean = false
+    private var loaded: Boolean = false
     private var isRightSide: Boolean = true
     private var dropped: Boolean = false
 
     var onShownChanged: ((Boolean) -> Unit)? = null
     var appNameProvider: (() -> String)? = null
-    val isShown: Boolean get() = added
+    val isShown: Boolean get() = added && !userHidden
 
     private val autoCloseHandler = Handler(Looper.getMainLooper())
     private val autoCloseRunnable = Runnable { setExpanded(false) }
@@ -81,7 +92,7 @@ class ShelfController(
     init {
         lp.gravity = Gravity.TOP or Gravity.END
         lp.x = 0
-        lp.y = 400
+        lp.y = (120 * dp).toInt()
 
         updateBackground()
 
@@ -92,7 +103,10 @@ class ShelfController(
 
         scroll.addView(list)
         scroll.visibility = View.GONE
-        scroll.setOnTouchListener { _, _ -> resetAutoClose(); false }
+        scroll.setOnTouchListener { _, _ ->
+            resetAutoClose()
+            false
+        }
 
         topBar.orientation = LinearLayout.HORIZONTAL
         topBar.setPadding(pad, pad, pad, 0)
@@ -123,12 +137,16 @@ class ShelfController(
         root.addView(scroll)
         topBar.visibility = View.GONE
 
-        val savedItems = historyManager.loadHistory()
-        if (savedItems.isNotEmpty()) {
-            items.addAll(savedItems)
+        // التحميل بيدمج المحفوظ مع أي حاجة اتضافت قبل ما يخلص، وبعدها بس يبدأ الحفظ
+        scope.launch {
+            val saved = historyManager.loadHistory()
+            val known = items.map { it.text }.toSet()
+            items.addAll(saved.filter { it.text !in known })
+            items.sortByDescending { it.timestamp }
+            loaded = true
+            render()
+            persist()
         }
-
-        render()
 
         root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
@@ -144,10 +162,14 @@ class ShelfController(
 
             override fun onTouch(v: View?, event: MotionEvent?): Boolean {
                 if (event == null) return false
+                if (userHidden) return false
 
                 if (event.action == MotionEvent.ACTION_OUTSIDE) {
-                    if (customMenu?.visibility == View.VISIBLE) hideCustomMenu()
-                    else if (expanded) setExpanded(false)
+                    if (customMenu?.visibility == View.VISIBLE) {
+                        hideCustomMenu()
+                    } else if (expanded) {
+                        setExpanded(false)
+                    }
                     return true
                 }
 
@@ -166,6 +188,7 @@ class ShelfController(
                         autoCloseHandler.postDelayed(longPressRunnable, 600)
                         return true
                     }
+
                     MotionEvent.ACTION_MOVE -> {
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
@@ -183,6 +206,7 @@ class ShelfController(
                         }
                         return true
                     }
+
                     MotionEvent.ACTION_UP -> {
                         autoCloseHandler.removeCallbacks(longPressRunnable)
 
@@ -209,6 +233,7 @@ class ShelfController(
                         }
                         return true
                     }
+
                     MotionEvent.ACTION_CANCEL -> {
                         autoCloseHandler.removeCallbacks(longPressRunnable)
                         return true
@@ -229,27 +254,44 @@ class ShelfController(
         if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, 10000)
     }
 
+    // حفظ نسخة من القايمة، عشان الخيط التاني ما يقراش قايمة بتتعدل
+    private fun persist() {
+        if (!loaded) return
+        val snapshot = ArrayList(items)
+        scope.launch { historyManager.saveHistory(snapshot) }
+    }
+
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
                 val hasText = e.clipDescription?.hasMimeType("text/*") == true
                 if (hasText) {
                     dropped = false
+                    dragFromHidden = userHidden
                     setExpanded(true)
                 }
                 return hasText
             }
+
             DragEvent.ACTION_DROP -> {
                 dropped = true
                 e.clipData?.let { cd ->
                     for (i in 0 until cd.itemCount) {
                         cd.getItemAt(i).coerceToText(ctx)?.toString()
-                            ?.let { add(it, appNameProvider?.invoke() ?: "سحب") }
+                            ?.let { add(it, appNameProvider?.invoke() ?: "سحب", popUp = !dragFromHidden) }
                     }
                 }
             }
+
             DragEvent.ACTION_DRAG_ENDED -> {
-                if (!dropped) setExpanded(false) else resetAutoClose()
+                if (dragFromHidden) {
+                    dragFromHidden = false
+                    setExpanded(false)
+                } else if (!dropped) {
+                    setExpanded(false)
+                } else {
+                    resetAutoClose()
+                }
             }
         }
         return true
@@ -263,30 +305,30 @@ class ShelfController(
             if (!added) return@addUpdateListener
             val value = animation.animatedValue as Float
             root.alpha = value
-            lp.y = startY + ((1f - value) * 150).toInt()
+            lp.y = startY + ((1f - value) * (40 * dp)).toInt()
             wm.updateViewLayout(root, lp)
         }
         anim.addListener(object : AnimatorListenerAdapter() {
             override fun onAnimationEnd(animation: Animator) {
-                hide()
-                root.alpha = 1f
                 lp.y = startY
+                root.alpha = 1f
+                hide()
             }
         })
         anim.start()
     }
 
     private fun updateBackground() {
-        val radius = 12f * dp
+        val radius = 16f * dp
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor("#E6202124"))
+            setColor(Color.parseColor("#E60B1B3A"))
             if (isRightSide) {
                 cornerRadii = floatArrayOf(radius, radius, 0f, 0f, 0f, 0f, radius, radius)
             } else {
                 cornerRadii = floatArrayOf(0f, 0f, radius, radius, radius, radius, 0f, 0f)
             }
-            setStroke((1 * dp).toInt(), Color.parseColor("#402196F3"))
+            setStroke((1 * dp).toInt(), Color.parseColor("#334DE1E1"))
         }
         root.background = bg
     }
@@ -295,46 +337,75 @@ class ShelfController(
         if (!added) {
             wm.addView(root, lp)
             added = true
-            root.alpha = 1f
-            onShownChanged?.invoke(true)
         }
+        userHidden = false
+        root.visibility = View.VISIBLE
+        root.alpha = 1f
+        onShownChanged?.invoke(true)
     }
 
+    // الإخفاء بيخلي النافذة موجودة (عشان السحب يفضل شغال) لكن الرف مش ظاهر
     fun hide() {
-        if (added) {
-            wm.removeView(root)
-            added = false
-            onShownChanged?.invoke(false)
-        }
+        if (!added) return
+        userHidden = true
+        setExpanded(false)
+        root.visibility = View.GONE
+        onShownChanged?.invoke(false)
     }
 
-    fun add(text: String, source: String = "تطبيق") {
+    fun destroy() {
+        onShownChanged = null
+        autoCloseHandler.removeCallbacksAndMessages(null)
+        scope.cancel()
+        if (added) {
+            try {
+                wm.removeView(root)
+            } catch (ignored: Exception) {
+            }
+            added = false
+        }
+        userHidden = false
+    }
+
+    // موجودة عشان أي كود قديم ينادي عليها ما يقعش في البناء
+    fun pasteFromClipboard() {
+        show()
+        setExpanded(true)
+    }
+
+    fun add(text: String, source: String = "تطبيق", popUp: Boolean = true) {
         val t = text.trim()
         if (t.isEmpty()) return
 
-        if (!added) show()
+        if (popUp && (!added || userHidden)) show()
 
         items.removeAll { it.text == t }
         items.add(0, ShelfItem(t, source))
 
-        while (items.size > 100) items.removeAt(items.size - 1)
+        while (items.size > 100) {
+            val idx = items.indexOfLast { !it.isPinned }
+            if (idx < 0) break
+            items.removeAt(idx)
+        }
 
         render()
-        historyManager.saveHistory(items)
-        setExpanded(true)
+        persist()
+        if (popUp) setExpanded(true)
     }
 
     fun setExpanded(on: Boolean) {
         expanded = on
         if (on) {
+            root.visibility = View.VISIBLE
+            root.alpha = 1f
             topBar.visibility = View.VISIBLE
-            lp.width = (170 * dp).toInt()
-            lp.height = (320 * dp).toInt()
+            lp.width = (250 * dp).toInt()
+            lp.height = (360 * dp).toInt()
             if (lp.y > maxY()) lp.y = maxY()
             scroll.visibility = View.VISIBLE
 
             val params = scroll.layoutParams as FrameLayout.LayoutParams
-            params.topMargin = (40 * dp).toInt()
+            params.topMargin = (44 * dp).toInt()
             scroll.layoutParams = params
 
             resetAutoClose()
@@ -345,6 +416,7 @@ class ShelfController(
             scroll.visibility = View.GONE
             hideCustomMenu()
             autoCloseHandler.removeCallbacks(autoCloseRunnable)
+            if (userHidden) root.visibility = View.GONE
         }
         if (added) wm.updateViewLayout(root, lp)
     }
@@ -354,13 +426,13 @@ class ShelfController(
         if (items.isEmpty()) {
             list.addView(TextView(ctx).apply {
                 text = "الرف فارغ، اسحب نص هنا"
-                setTextColor(Color.parseColor("#80FFFFFF"))
+                setTextColor(Color.parseColor("#B3FFFFFF"))
                 textSize = 13f
             })
         } else {
             val sortedItems = items.sortedByDescending { it.isPinned }
-            for (item in sortedItems) {
-                list.addView(buildItem(item))
+            for ((index, item) in sortedItems.withIndex()) {
+                list.addView(buildItem(item, index))
             }
         }
     }
@@ -370,12 +442,12 @@ class ShelfController(
         if (customMenu == null) {
             customMenu = LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                setBackgroundColor(Color.parseColor("#DD202124"))
+                setBackgroundColor(Color.parseColor("#F20B1B3A"))
                 val pad = (10 * dp).toInt()
                 setPadding(pad, pad, pad, pad)
                 y = (50 * dp)
                 layoutParams = FrameLayout.LayoutParams(
-                    (150 * dp).toInt(),
+                    (160 * dp).toInt(),
                     FrameLayout.LayoutParams.WRAP_CONTENT
                 )
             }
@@ -385,7 +457,7 @@ class ShelfController(
                 val tv = TextView(ctx).apply {
                     text = opt
                     setTextColor(Color.WHITE)
-                    textSize = 16f
+                    textSize = 15f
                     setPadding((16 * dp).toInt(), (12 * dp).toInt(), (16 * dp).toInt(), (12 * dp).toInt())
                     layoutDirection = View.LAYOUT_DIRECTION_RTL
                     setOnClickListener {
@@ -395,12 +467,18 @@ class ShelfController(
                                 setExpanded(false)
                                 val intent = Intent(ctx, HistoryActivity::class.java)
                                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                ctx.startActivity(intent)
+                                try {
+                                    ctx.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(ctx, "افتح التطبيق من الأيقونة", Toast.LENGTH_SHORT).show()
+                                }
                             }
+
                             "الإعدادات" -> {
                                 hideCustomMenu()
                                 Toast.makeText(ctx, "شاشة الإعدادات قريباً", Toast.LENGTH_SHORT).show()
                             }
+
                             "إغلاق" -> {
                                 setExpanded(false)
                                 hideCustomMenu()
@@ -432,18 +510,26 @@ class ShelfController(
         customMenu?.visibility = View.GONE
     }
 
-    private fun buildItem(item: ShelfItem): LinearLayout {
+    private fun buildItem(item: ShelfItem, index: Int): LinearLayout {
         val card = LinearLayout(ctx)
         card.orientation = LinearLayout.HORIZONTAL
         val pad = (12 * dp).toInt()
         card.setPadding(pad, pad, pad, pad)
         card.layoutDirection = list.layoutDirection
 
+        val accentColors = listOf(
+            Color.parseColor("#B364B5F6"),
+            Color.parseColor("#B381C784"),
+            Color.parseColor("#B3BA68C8"),
+            Color.parseColor("#B3FFB74D")
+        )
+        val cardColor = accentColors[index % accentColors.size]
+
         val cardBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            setColor(Color.parseColor("#33FFFFFF"))
-            cornerRadius = (10 * dp)
-            setStroke((1 * dp).toInt(), Color.parseColor("#402196F3"))
+            setColor(cardColor)
+            cornerRadius = (12 * dp)
+            setStroke((1 * dp).toInt(), Color.parseColor("#66FFFFFF"))
         }
         card.background = cardBg
 
@@ -462,7 +548,8 @@ class ShelfController(
         val tvText = TextView(ctx)
         tvText.text = item.text
         tvText.maxLines = 3
-        tvText.setTextColor(Color.WHITE)
+        tvText.setTextColor(Color.parseColor("#0B1B3A"))
+        tvText.setTypeface(null, Typeface.BOLD)
         tvText.textSize = 14f
         tvText.layoutDirection = View.LAYOUT_DIRECTION_LOCALE
         textLayout.addView(tvText)
@@ -472,7 +559,7 @@ class ShelfController(
 
         val tvSource = TextView(ctx)
         tvSource.text = "${item.source} • $timeStr"
-        tvSource.setTextColor(Color.parseColor("#B3FFFFFF"))
+        tvSource.setTextColor(Color.parseColor("#1A2B4C"))
         tvSource.textSize = 11f
         tvSource.setPadding(0, (4 * dp).toInt(), 0, 0)
         tvSource.layoutDirection = View.LAYOUT_DIRECTION_LOCALE
@@ -484,11 +571,11 @@ class ShelfController(
             text = if (item.isPinned) "★" else "☆"
             textSize = 22f
             setPadding((8 * dp).toInt(), 0, 0, 0)
-            setTextColor(if (item.isPinned) Color.parseColor("#FFD700") else Color.WHITE)
+            setTextColor(if (item.isPinned) Color.parseColor("#0B1B3A") else Color.parseColor("#800B1B3A"))
             setOnClickListener {
                 item.isPinned = !item.isPinned
                 render()
-                historyManager.saveHistory(items)
+                persist()
             }
         }
         card.addView(pinBtn)
@@ -501,7 +588,7 @@ class ShelfController(
                     if (!item.isPinned) {
                         items.remove(item)
                         render()
-                        historyManager.saveHistory(items)
+                        persist()
                     }
                     return true
                 }
