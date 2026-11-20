@@ -6,8 +6,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -15,9 +13,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.service.quicksettings.TileService
 import android.util.Log
-import android.view.Gravity
-import android.view.View
-import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -44,9 +39,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var ignoreClipUntil: Long = 0L
 
     private var captureBusy: Boolean = false
-    private var lastFocusCapture: Long = 0L
-    private var manualCapture: Boolean = false
-    private var focusView: View? = null
+    private var lastCaptured: String? = null
+    private var lastCapturedAt: Long = 0L
+
+    private val copyWords = listOf("copy", "نسخ")
 
     val shelfShown: Boolean get() = shelf?.isShown == true
 
@@ -57,7 +53,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     // التقاط يدوي للحافظة (ممكن يتنادى من أي زرار أو إشعار)
     fun pasteFromShelf() {
-        captureWithFocus(force = true)
+        lastCopyApp = getAppName()
+        requestCapture(manual = true)
     }
 
     private fun dbg(msg: String) {
@@ -82,6 +79,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     this, ComponentName(this, SuperHubTileService::class.java)
                 )
             }
+            // لما تدوس على مقبض الرف: نقرا الحافظة (المسار اليدوي المضمون)
+            shelf?.onOpenedByUser = {
+                lastCopyApp = getAppName()
+                requestCapture(manual = true)
+            }
             shelf?.show()
         }
 
@@ -90,138 +92,110 @@ class ClipboardAccessibilityService : AccessibilityService() {
         val l = ClipboardManager.OnPrimaryClipChangedListener {
             val until = maxOf(ignoreClipUntil, HistoryRepository.ignoreClipUntil)
             if (System.currentTimeMillis() < until) return@OnPrimaryClipChangedListener
-            lastCopyApp = getAppName()
-            dbg("رصدت نسخ من $lastCopyApp")
-            // أول محاولة: قراءة عادية. لو النظام منعها نفتح الالتقاط بالتركيز
-            if (readClipAndAdd()) dbg("اتقرا مباشرة") else captureWithFocus(force = false)
+            dbg("النظام بلّغني بنسخ")
+            if (lastCopyApp == null) lastCopyApp = getAppName()
+            if (!readDirect()) requestCapture(manual = false)
         }
         clipListener = l
         clipboardManager.addPrimaryClipChangedListener(l)
     }
 
-    // بترجع true لو الحافظة اتقرت (حتى لو المحتوى حساس وتجاهلناه)، وfalse لو النظام منع القراءة أو فاضية
-    private fun readClipAndAdd(): Boolean {
-        return try {
+    // قراءة عادية بدون تركيز: بترجع true لو اتقرت
+    private fun readDirect(): Boolean {
+        try {
             val clip = clipboardManager.primaryClip
-            if (clip == null || clip.itemCount == 0) {
-                false
-            } else {
+            if (clip != null && clip.itemCount > 0) {
                 val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
                     clip.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
-                if (sensitive) {
-                    true
-                } else {
-                    val text = clip.getItemAt(0).coerceToText(this)?.toString()
-                    if (text.isNullOrBlank()) {
-                        false
-                    } else {
-                        shelf?.add(text, lastCopyApp ?: getAppName())
-                        true
-                    }
+                val text = clip.getItemAt(0).coerceToText(this)?.toString()
+                if (sensitive || !text.isNullOrBlank()) {
+                    onCaptured(text, sensitive, false)
+                    return true
                 }
             }
         } catch (e: Exception) {
-            false
         }
+        return false
     }
 
-    // الالتقاط بالتركيز: Activity شفافة بتفتح لحظة وتقرا الحافظة وتقفل
-    private fun captureWithFocus(force: Boolean) {
-        val now = SystemClock.uptimeMillis()
+    // الالتقاط بالتركيز: نافذة الرف بتبقى قابلة للتركيز لحظة وبتقرا الحافظة
+    private fun requestCapture(manual: Boolean) {
         if (captureBusy) return
-        if (!force && now - lastFocusCapture < 700) return
-        lastFocusCapture = now
-        manualCapture = force
+        val s = shelf
+        if (s == null) return
         captureBusy = true
-        handler.postDelayed({ captureBusy = false }, 1500)
-
-        dbg("النظام منع القراءة، بفتح الالتقاط")
-        try {
-            val i = Intent(this, ClipCaptureActivity::class.java)
-            i.addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_NO_ANIMATION or
-                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
-                    Intent.FLAG_ACTIVITY_NO_HISTORY
-            )
-            startActivity(i)
-        } catch (e: Exception) {
-            dbg("الـ Activity ما اشتغلتش، بجرب النافذة")
-            captureWithOverlay()
-        }
-    }
-
-    // الـ Activity بتنادي هنا بعد ما تقرا الحافظة
-    fun handleCapturedFromActivity(text: String?, sensitive: Boolean) {
-        captureBusy = false
-        when {
-            sensitive -> dbg("محتوى حساس، اتجاهلته")
-            text.isNullOrBlank() -> {
-                dbg("الحافظة فاضية حتى مع التركيز")
-                if (manualCapture) {
-                    Toast.makeText(this, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
-                }
-            }
-            else -> {
-                dbg("اتقرا بالتركيز")
-                shelf?.add(text, lastCopyApp ?: getAppName())
-            }
-        }
-    }
-
-    // خطة بديلة لو فتح الـ Activity من الخلفية اتمنع: نافذة 1×1 بتاخد التركيز لحظة
-    private fun captureWithOverlay() {
-        if (focusView != null) return
-        val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val v = View(this)
-        val p = WindowManager.LayoutParams(
-            1, 1,
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        )
-        p.gravity = Gravity.TOP or Gravity.START
-        try {
-            wm.addView(v, p)
-            focusView = v
-        } catch (e: Exception) {
+        handler.postDelayed({ captureBusy = false }, 3000)
+        s.captureClipboard { text, sensitive ->
             captureBusy = false
+            onCaptured(text, sensitive, manual)
+        }
+    }
+
+    private fun onCaptured(text: String?, sensitive: Boolean, manual: Boolean) {
+        if (sensitive) {
+            dbg("محتوى حساس، اتجاهلته")
             return
         }
-        attemptOverlayRead(0)
-    }
-
-    private fun attemptOverlayRead(attempt: Int) {
-        handler.postDelayed({
-            val done = readClipAndAdd()
-            if (done || attempt >= 2) {
-                releaseFocusView()
-                captureBusy = false
-                if (!done) dbg("النافذة كمان ما قدرتش تقرا")
-            } else {
-                attemptOverlayRead(attempt + 1)
+        if (text.isNullOrBlank()) {
+            dbg("الحافظة فاضية أو النظام منع القراءة")
+            if (manual) {
+                Toast.makeText(this, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
             }
-        }, if (attempt == 0) 200L else 250L)
-    }
-
-    private fun releaseFocusView() {
-        val v = focusView ?: return
-        try {
-            (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v)
-        } catch (e: Exception) {
+            return
         }
-        focusView = null
+        val now = SystemClock.uptimeMillis()
+        val duplicate = text == lastCaptured && (manual || now - lastCapturedAt < 5000)
+        if (duplicate) {
+            dbg("نفس النص، اتجاهلته")
+            return
+        }
+        lastCaptured = text
+        lastCapturedAt = now
+        shelf?.add(text, lastCopyApp ?: getAppName())
+        dbg("اتسجل من ${lastCopyApp ?: "تطبيق"}")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val p = event.packageName?.toString() ?: return
-            if (p != packageName && p != "com.android.systemui" &&
-                !p.contains("inputmethod") && !p.contains("keyboard")) {
-                lastApp = p
+        if (event == null) return
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                val p = event.packageName?.toString() ?: return
+                if (p != packageName && p != "com.android.systemui" &&
+                    !p.contains("inputmethod") && !p.contains("keyboard")) {
+                    lastApp = p
+                }
+            }
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                val pkg = event.packageName?.toString()
+                if (pkg == null || pkg == packageName) return
+                if (looksLikeCopy(event)) {
+                    lastCopyApp = labelFor(pkg)
+                    dbg("ضغطة نسخ في $lastCopyApp")
+                    // التطبيق محتاج لحظة يحط النص في الحافظة قبل ما نقراه
+                    handler.postDelayed({ requestCapture(manual = false) }, 150)
+                }
             }
         }
+    }
+
+    // هل الضغطة كانت على زرار اسمه "نسخ" أو "Copy"؟
+    private fun looksLikeCopy(e: AccessibilityEvent): Boolean {
+        val parts = ArrayList<String>()
+        try {
+            e.text?.forEach { parts.add(it.toString()) }
+            e.contentDescription?.let { parts.add(it.toString()) }
+            val n = e.source
+            if (n != null) {
+                n.text?.let { parts.add(it.toString()) }
+                n.contentDescription?.let { parts.add(it.toString()) }
+                n.viewIdResourceName?.let { parts.add(it) }
+            }
+        } catch (ex: Exception) {
+        }
+        val joined = parts.joinToString(" ").lowercase()
+        // نص طويل معناه رسالة مش زرار
+        if (joined.isEmpty() || joined.length > 60) return false
+        return copyWords.any { joined.contains(it) }
     }
 
     private fun updatePrefs(isVisible: Boolean) {
@@ -240,14 +214,17 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun getAppName(): String {
-        val p = currentForegroundPackage() ?: lastApp ?: return "تطبيق"
+    private fun labelFor(p: String): String {
         return try {
-            val appInfo = packageManager.getApplicationInfo(p, 0)
-            packageManager.getApplicationLabel(appInfo).toString()
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(p, 0)).toString()
         } catch (e: Exception) {
             p.substringAfterLast('.')
         }
+    }
+
+    private fun getAppName(): String {
+        val p = currentForegroundPackage() ?: lastApp ?: return "تطبيق"
+        return labelFor(p)
     }
 
     fun insertIntoFocused(text: String) {
@@ -257,6 +234,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
             return
         }
         ignoreClipUntil = System.currentTimeMillis() + 1000
+        // الحافظة هتبقى فيها النص ده، فنعتبره "اتلقط" عشان ما يترجعش للرف تاني
+        lastCaptured = text
+        lastCapturedAt = SystemClock.uptimeMillis()
         clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
 
         if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
@@ -277,7 +257,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         instance = null
         handler.removeCallbacksAndMessages(null)
-        releaseFocusView()
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
         clipListener = null
         shelf?.destroy()
