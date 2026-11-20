@@ -75,7 +75,7 @@ object ShelfStyle {
     var closedWidthDp: Float = 24f
     var closedHeightDp: Float = 150f
     var expandedWidthDp: Float = 280f
-    var expandedHeightDp: Float = 400f
+    var expandedHeightDp: Float = 560f
 
     var autoCloseMs: Long = 10_000L
     var otpTtlMs: Long = 60_000L
@@ -516,7 +516,9 @@ class ShelfController(
             scroll.visibility = View.VISIBLE
             grip.visibility = View.GONE
             lp.width = (ShelfStyle.expandedWidthDp * dp).toInt()
+            // الارتفاع مثبّت من ShelfStyle، ومحمي إنه ما يعدّيش 90% من الشاشة
             lp.height = (ShelfStyle.expandedHeightDp * dp).toInt()
+                .coerceAtMost((ctx.resources.displayMetrics.heightPixels * 0.9f).toInt())
             if (lp.y > maxY()) lp.y = maxY()
             resetAutoClose()
         } else {
@@ -598,9 +600,12 @@ class ShelfController(
                                     Toast.makeText(ctx, "افتح التطبيق من الأيقونة", Toast.LENGTH_SHORT).show()
                                 }
                             }
-                            "الإعدادات" ->
+                            "الإعدادات" -> {
                                 Toast.makeText(ctx, "الإعدادات قريباً", Toast.LENGTH_SHORT).show()
-                            "إغلاق" -> setExpanded(false)
+                            }
+                            "إغلاق" -> {
+                                setExpanded(false)
+                            }
                         }
                     }
                 }
