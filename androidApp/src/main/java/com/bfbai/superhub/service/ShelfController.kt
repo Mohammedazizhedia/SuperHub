@@ -120,6 +120,7 @@ class ShelfController(
 
     var onShownChanged: ((Boolean) -> Unit)? = null
     var appNameProvider: (() -> String)? = null
+    var onOpenedByUser: (() -> Unit)? = null
     val isShown: Boolean get() = added && !userHidden
 
     private val autoCloseHandler = Handler(Looper.getMainLooper())
@@ -331,7 +332,11 @@ class ShelfController(
                             render()
                             if (added) wm.updateViewLayout(root, lp)
                         } else {
-                            if (!expanded) setExpanded(true)
+                            if (!expanded) {
+                                setExpanded(true)
+                                // الضغطة على المقبض = "اقرا الحافظة دلوقتي"
+                                onOpenedByUser?.invoke()
+                            }
                         }
                         return true
                     }
@@ -354,6 +359,60 @@ class ShelfController(
     private fun resetAutoClose() {
         autoCloseHandler.removeCallbacks(autoCloseRunnable)
         if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, ShelfStyle.autoCloseMs)
+    }
+
+    /**
+     * بتخلي نافذة الرف قابلة للتركيز لحظة قصيرة، وده اللي بيسمح لأندرويد نقرا الحافظة.
+     * النتيجة بترجع في onResult: (النص أو null، هل المحتوى حساس)
+     */
+    fun captureClipboard(onResult: (String?, Boolean) -> Unit) {
+        if (!added) {
+            onResult(null, false)
+            return
+        }
+        val wasGone = root.visibility == View.GONE
+        if (wasGone) root.visibility = View.INVISIBLE
+        lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        try {
+            wm.updateViewLayout(root, lp)
+        } catch (e: Exception) {
+            lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            if (wasGone) root.visibility = View.GONE
+            onResult(null, false)
+            return
+        }
+        attemptCapture(0, wasGone, onResult)
+    }
+
+    private fun attemptCapture(n: Int, wasGone: Boolean, onResult: (String?, Boolean) -> Unit) {
+        autoCloseHandler.postDelayed({
+            var text: String? = null
+            var sensitive = false
+            try {
+                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = cm.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                        clip.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
+                    text = clip.getItemAt(0).coerceToText(ctx)?.toString()
+                }
+            } catch (e: Exception) {
+            }
+            val got = sensitive || !text.isNullOrBlank()
+            if (!got && n < 2 && added) {
+                attemptCapture(n + 1, wasGone, onResult)
+            } else {
+                lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                if (added) {
+                    if (wasGone && userHidden) root.visibility = View.GONE
+                    try {
+                        wm.updateViewLayout(root, lp)
+                    } catch (e: Exception) {
+                    }
+                }
+                onResult(text, sensitive)
+            }
+        }, if (n == 0) 250L else 300L)
     }
 
     private fun detectOf(text: String): Detection {
@@ -478,6 +537,7 @@ class ShelfController(
 
     fun destroy() {
         onShownChanged = null
+        onOpenedByUser = null
         autoCloseHandler.removeCallbacksAndMessages(null)
         scope.cancel()
         if (added) {
