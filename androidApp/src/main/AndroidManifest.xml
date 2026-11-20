@@ -22,6 +22,15 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
+        <!-- Built with BFB.AI: التقاط الحافظة بالتركيز (شفافة وبتقفل لوحدها) -->
+        <activity
+            android:name=".service.ClipCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <!-- Built with BFB.AI: شاشة السجل -->
         <activity
             android:name=".ui.HistoryActivity"
