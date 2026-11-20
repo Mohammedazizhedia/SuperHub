@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Bundle
@@ -28,6 +29,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
     companion object {
         @Volatile
         var instance: ClipboardAccessibilityService? = null
+
+        // رسائل التشخيص المؤقتة: خليها false بعد ما نتأكد إن النسخ شغال
+        private const val DEBUG = true
     }
 
     private lateinit var clipboardManager: ClipboardManager
@@ -39,9 +43,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var lastCopyApp: String? = null
     private var ignoreClipUntil: Long = 0L
 
-    private var focusView: View? = null
+    private var captureBusy: Boolean = false
     private var lastFocusCapture: Long = 0L
     private var manualCapture: Boolean = false
+    private var focusView: View? = null
 
     val shelfShown: Boolean get() = shelf?.isShown == true
 
@@ -53,6 +58,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
     // التقاط يدوي للحافظة (ممكن يتنادى من أي زرار أو إشعار)
     fun pasteFromShelf() {
         captureWithFocus(force = true)
+    }
+
+    private fun dbg(msg: String) {
+        if (DEBUG) Toast.makeText(this, "HubSync: $msg", Toast.LENGTH_SHORT).show()
     }
 
     override fun onServiceConnected() {
@@ -82,8 +91,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
             val until = maxOf(ignoreClipUntil, HistoryRepository.ignoreClipUntil)
             if (System.currentTimeMillis() < until) return@OnPrimaryClipChangedListener
             lastCopyApp = getAppName()
-            // أول محاولة: قراءة عادية. لو النظام منعها (واتساب وفيسبوك وغيرهم)، ناخد تركيز لحظي
-            if (!readClipAndAdd()) captureWithFocus(force = false)
+            dbg("رصدت نسخ من $lastCopyApp")
+            // أول محاولة: قراءة عادية. لو النظام منعها نفتح الالتقاط بالتركيز
+            if (readClipAndAdd()) dbg("اتقرا مباشرة") else captureWithFocus(force = false)
         }
         clipListener = l
         clipboardManager.addPrimaryClipChangedListener(l)
@@ -115,14 +125,53 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // نافذة شفافة 1×1 بتاخد التركيز لحظة، وده اللي بيسمح للنظام نقرا الحافظة
+    // الالتقاط بالتركيز: Activity شفافة بتفتح لحظة وتقرا الحافظة وتقفل
     private fun captureWithFocus(force: Boolean) {
         val now = SystemClock.uptimeMillis()
-        if (focusView != null) return
-        if (!force && now - lastFocusCapture < 600) return
+        if (captureBusy) return
+        if (!force && now - lastFocusCapture < 700) return
         lastFocusCapture = now
         manualCapture = force
+        captureBusy = true
+        handler.postDelayed({ captureBusy = false }, 1500)
 
+        dbg("النظام منع القراءة، بفتح الالتقاط")
+        try {
+            val i = Intent(this, ClipCaptureActivity::class.java)
+            i.addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_NO_ANIMATION or
+                    Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
+                    Intent.FLAG_ACTIVITY_NO_HISTORY
+            )
+            startActivity(i)
+        } catch (e: Exception) {
+            dbg("الـ Activity ما اشتغلتش، بجرب النافذة")
+            captureWithOverlay()
+        }
+    }
+
+    // الـ Activity بتنادي هنا بعد ما تقرا الحافظة
+    fun handleCapturedFromActivity(text: String?, sensitive: Boolean) {
+        captureBusy = false
+        when {
+            sensitive -> dbg("محتوى حساس، اتجاهلته")
+            text.isNullOrBlank() -> {
+                dbg("الحافظة فاضية حتى مع التركيز")
+                if (manualCapture) {
+                    Toast.makeText(this, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
+                }
+            }
+            else -> {
+                dbg("اتقرا بالتركيز")
+                shelf?.add(text, lastCopyApp ?: getAppName())
+            }
+        }
+    }
+
+    // خطة بديلة لو فتح الـ Activity من الخلفية اتمنع: نافذة 1×1 بتاخد التركيز لحظة
+    private fun captureWithOverlay() {
+        if (focusView != null) return
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val v = View(this)
         val p = WindowManager.LayoutParams(
@@ -137,21 +186,21 @@ class ClipboardAccessibilityService : AccessibilityService() {
             wm.addView(v, p)
             focusView = v
         } catch (e: Exception) {
+            captureBusy = false
             return
         }
-        attemptFocusedRead(wm, 0)
+        attemptOverlayRead(0)
     }
 
-    private fun attemptFocusedRead(wm: WindowManager, attempt: Int) {
+    private fun attemptOverlayRead(attempt: Int) {
         handler.postDelayed({
             val done = readClipAndAdd()
             if (done || attempt >= 2) {
                 releaseFocusView()
-                if (!done && manualCapture) {
-                    Toast.makeText(this, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
-                }
+                captureBusy = false
+                if (!done) dbg("النافذة كمان ما قدرتش تقرا")
             } else {
-                attemptFocusedRead(wm, attempt + 1)
+                attemptOverlayRead(attempt + 1)
             }
         }, if (attempt == 0) 200L else 250L)
     }
