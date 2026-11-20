@@ -26,12 +26,13 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.bfbai.superhub.ui.HistoryActivity
-import com.bfbai.superhub.utils.HistoryManager
+import com.bfbai.superhub.utils.HistoryRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,8 +52,9 @@ class ShelfController(
 ) {
     private val wm: WindowManager = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val dp: Float = ctx.resources.displayMetrics.density
+
+    // نسخة للعرض فقط، المصدر الحقيقي هو HistoryRepository
     private val items: ArrayList<ShelfItem> = ArrayList()
-    private val historyManager = HistoryManager(ctx)
 
     private val job = SupervisorJob()
     private val scope = CoroutineScope(Dispatchers.Main + job)
@@ -61,7 +63,6 @@ class ShelfController(
     private var added: Boolean = false
     private var userHidden: Boolean = false
     private var dragFromHidden: Boolean = false
-    private var loaded: Boolean = false
     private var isRightSide: Boolean = true
     private var dropped: Boolean = false
 
@@ -90,6 +91,8 @@ class ShelfController(
     )
 
     init {
+        HistoryRepository.init(ctx)
+
         lp.gravity = Gravity.TOP or Gravity.END
         lp.x = 0
         lp.y = (120 * dp).toInt()
@@ -137,16 +140,14 @@ class ShelfController(
         root.addView(scroll)
         topBar.visibility = View.GONE
 
-        // التحميل بيدمج المحفوظ مع أي حاجة اتضافت قبل ما يخلص، وبعدها بس يبدأ الحفظ
-        scope.launch {
-            val saved = historyManager.loadHistory()
-            val known = items.map { it.text }.toSet()
-            items.addAll(saved.filter { it.text !in known })
-            items.sortByDescending { it.timestamp }
-            loaded = true
-            render()
-            persist()
-        }
+        // أي تغيير في المخزن (من الرف أو من شاشة السجل) بيتعرض هنا فوراً
+        HistoryRepository.items
+            .onEach { all ->
+                items.clear()
+                items.addAll(all.sortedByDescending { it.isPinned }.take(100))
+                render()
+            }
+            .launchIn(scope)
 
         root.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
@@ -252,13 +253,6 @@ class ShelfController(
     private fun resetAutoClose() {
         autoCloseHandler.removeCallbacks(autoCloseRunnable)
         if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, 10000)
-    }
-
-    // حفظ نسخة من القايمة، عشان الخيط التاني ما يقراش قايمة بتتعدل
-    private fun persist() {
-        if (!loaded) return
-        val snapshot = ArrayList(items)
-        scope.launch { historyManager.saveHistory(snapshot) }
     }
 
     private fun handleDrag(e: DragEvent): Boolean {
@@ -379,17 +373,8 @@ class ShelfController(
 
         if (popUp && (!added || userHidden)) show()
 
-        items.removeAll { it.text == t }
-        items.add(0, ShelfItem(t, source))
+        HistoryRepository.add(t, source)
 
-        while (items.size > 100) {
-            val idx = items.indexOfLast { !it.isPinned }
-            if (idx < 0) break
-            items.removeAt(idx)
-        }
-
-        render()
-        persist()
         if (popUp) setExpanded(true)
     }
 
@@ -430,8 +415,7 @@ class ShelfController(
                 textSize = 13f
             })
         } else {
-            val sortedItems = items.sortedByDescending { it.isPinned }
-            for ((index, item) in sortedItems.withIndex()) {
+            for ((index, item) in items.withIndex()) {
                 list.addView(buildItem(item, index))
             }
         }
@@ -573,9 +557,7 @@ class ShelfController(
             setPadding((8 * dp).toInt(), 0, 0, 0)
             setTextColor(if (item.isPinned) Color.parseColor("#0B1B3A") else Color.parseColor("#800B1B3A"))
             setOnClickListener {
-                item.isPinned = !item.isPinned
-                render()
-                persist()
+                HistoryRepository.togglePin(item)
             }
         }
         card.addView(pinBtn)
@@ -586,9 +568,7 @@ class ShelfController(
                 val diffX = e2.x - e1.x
                 if (abs(diffX) > 100 && abs(velocityX) > 100) {
                     if (!item.isPinned) {
-                        items.remove(item)
-                        render()
-                        persist()
+                        HistoryRepository.remove(item)
                     }
                     return true
                 }
