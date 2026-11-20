@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -16,7 +17,7 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_hubsync"
         android:label="HubSync"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
@@ -27,7 +28,7 @@
             android:exported="false"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
-        <!-- Built with BFB.AI: نشاط استقبال المشاركات (نص + صورة + متعدد) -->
+        <!-- Built with BFB.AI: نشاط استقبال المشاركات -->
         <activity
             android:name=".ui.ShareReceiverActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
@@ -39,24 +40,7 @@
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="image/*" />
             </intent-filter>
-            <!-- دعم مشاركة أكثر من صورة -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND_MULTIPLE" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
-            </intent-filter>
         </activity>
-
-        <!-- Built with BFB.AI: FileProvider للتعامل مع الصور -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-                android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/file_paths" />
-        </provider>
 
         <!-- خدمة الالتقاط والرف -->
         <service
@@ -75,7 +59,7 @@
         <service
             android:name=".service.SuperHubTileService"
             android:exported="true"
-            android:icon="@android:drawable/ic_menu_edit"
+            android:icon="@drawable/ic_tile_hubsync"
             android:label="HubSync"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
