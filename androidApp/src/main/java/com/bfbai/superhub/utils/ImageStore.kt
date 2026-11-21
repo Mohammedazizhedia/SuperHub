@@ -13,6 +13,7 @@ import android.os.Looper
 import android.util.LruCache
 import androidx.core.content.FileProvider
 import java.io.File
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 
 /** حفظ الصور جوه التطبيق + نسخها ومشاركتها */
@@ -79,6 +80,24 @@ object ImageStore {
             } catch (ignored: Exception) {
             }
             return null
+        }
+    }
+
+    // بصمة محتوى الصورة (MD5): بنستخدمها عشان نعرف لو صورتين هما نفس الصورة
+    fun hashOf(path: String): String? {
+        return try {
+            val md = MessageDigest.getInstance("MD5")
+            File(path).inputStream().use { ins ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = ins.read(buf)
+                    if (n <= 0) break
+                    md.update(buf, 0, n)
+                }
+            }
+            md.digest().joinToString("") { b -> "%02x".format(b) }
+        } catch (e: Exception) {
+            null
         }
     }
 
