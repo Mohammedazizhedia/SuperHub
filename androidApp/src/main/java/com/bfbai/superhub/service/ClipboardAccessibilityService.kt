@@ -34,6 +34,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
         // مدة اعتبار ضغطة النسخ مصدراً للنص (ملي ثانية)
         private const val TRIGGER_WINDOW = 2500L
+
+        // لو نفس الصورة اتقرت تاني خلال المدة دي نعتبرها قراءة قديمة مش نسخ جديد
+        private const val SAME_IMAGE_WINDOW = 20_000L
     }
 
     private lateinit var clipboardManager: ClipboardManager
@@ -49,7 +52,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var captureBusy: Boolean = false
     private var captureToken: Int = 0
     private var lastCaptured: String? = null
-    private var lastImageKey: String? = null
+    private var lastImageHash: String? = null
     private var lastImageAt: Long = 0L
 
     // آخر تطبيق حصل فيه تحديد نص (لو خرجت منه بعدها، بنفحص الحافظة)
@@ -201,9 +204,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 val first = clip.getItemAt(0)
                 val uri = first.uri
                 if (d != null && d.hasMimeType("image/*") && uri != null) {
-                    // لو قراءة الصورة فشلت من غير تركيز، نجرب بالتركيز
-                    acceptImage(uri) {
-                        requestCapture(manual = false, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
+                    // لو القراءة فشلت أو طلعت نفس الصورة القديمة، نجرب بالتركيز
+                    acceptImage(uri) { sameOrFail ->
+                        if (sameOrFail) {
+                            requestCapture(manual = false, expectChange = true, acceptUnchanged = true, maxAttempts = 2)
+                        }
                     }
                     return true
                 }
@@ -230,25 +235,32 @@ class ClipboardAccessibilityService : AccessibilityService() {
         dbg("اتسجل من $src")
     }
 
-    private fun acceptImage(uri: Uri, onFail: (() -> Unit)?) {
-        val key = uri.toString()
-        val now = SystemClock.uptimeMillis()
-        if (key == lastImageKey && now - lastImageAt < 4000) return
-        lastImageKey = key
-        lastImageAt = now
+    /**
+     * بتحفظ الصورة وبتقارن بصمتها بآخر صورة اتسجلت.
+     * onFinished(true) معناها: فشلت القراءة أو طلعت نفس الصورة القديمة (غالباً الحافظة لسه ما اتحدثتش).
+     */
+    private fun acceptImage(uri: Uri, onFinished: (Boolean) -> Unit) {
         val src = sourceName()
         dbg("لقيت صورة في الحافظة، بحفظها")
         Thread {
             val path = ImageStore.saveFromUri(this, uri)
+            val h = if (path != null) ImageStore.hashOf(path) else null
             handler.post {
-                if (path != null) {
+                val now = SystemClock.uptimeMillis()
+                if (path == null) {
+                    dbg("مقدرتش أقرا الصورة: ${ImageStore.lastError ?: "-"}")
+                    onFinished(true)
+                } else if (h != null && h == lastImageHash && now - lastImageAt < SAME_IMAGE_WINDOW) {
+                    ImageStore.delete(path)
+                    dbg("نفس الصورة السابقة")
+                    onFinished(true)
+                } else {
+                    lastImageHash = h
+                    lastImageAt = now
                     HistoryRepository.addImage(path, src)
                     shelf?.popOpen()
                     dbg("اتسجلت صورة من $src")
-                } else {
-                    dbg("مقدرتش أقرا الصورة: ${ImageStore.lastError ?: "-"}")
-                    lastImageKey = null
-                    onFail?.invoke()
+                    onFinished(false)
                 }
             }
         }.start()
@@ -256,7 +268,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     /**
      * الالتقاط بالتركيز.
-     * expectChange: لو الحافظة لسه فيها النص القديم، نستنى ونقرا تاني (بعض التطبيقات بتتأخر).
+     * expectChange: لو الحافظة لسه فيها النص (أو الصورة) القديم، نستنى ونقرا تاني.
      * acceptUnchanged: لو النص فضل زي ما هو بعد كل المحاولات، نسجله برضه (نسخ متكرر مقصود)
      */
     private fun requestCapture(
@@ -269,8 +281,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
         val s = shelf ?: return
         captureBusy = true
         val token = ++captureToken
-        // أمان: لو حصل أي حاجة غريبة نفك القفل بعد 6 ثواني
-        handler.postDelayed({ if (captureToken == token) captureBusy = false }, 6000)
+        // أمان: لو حصل أي حاجة غريبة نفك القفل بعد 8 ثواني
+        handler.postDelayed({ if (captureToken == token) captureBusy = false }, 8000)
         captureLoop(s, 0, lastCaptured, manual, expectChange, acceptUnchanged, maxAttempts)
     }
 
@@ -285,8 +297,18 @@ class ClipboardAccessibilityService : AccessibilityService() {
     ) {
         s.captureClipboard { text, uri, skipped ->
             if (uri != null) {
-                captureBusy = false
-                acceptImage(uri, null)
+                acceptImage(uri) { sameOrFail ->
+                    if (sameOrFail && expectChange && attempt < maxAttempts) {
+                        handler.postDelayed(
+                            {
+                                captureLoop(s, attempt + 1, baseline, manual, expectChange, acceptUnchanged, maxAttempts)
+                            },
+                            350
+                        )
+                    } else {
+                        captureBusy = false
+                    }
+                }
                 return@captureClipboard
             }
             if (skipped) {
