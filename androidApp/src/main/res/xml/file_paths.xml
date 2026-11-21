@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths>
-    <!-- مسار حفظ الصور في الملفات الداخلية -->
-    <files-path name="hubsync_images" path="HubSyncImages/" />
-    <!-- مسار الكاش (اختياري) -->
-    <cache-path name="hubsync_cache" path="." />
-</paths>
