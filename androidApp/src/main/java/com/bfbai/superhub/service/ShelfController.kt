@@ -6,6 +6,7 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -24,6 +25,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -31,8 +33,10 @@ import android.widget.Toast
 import com.bfbai.superhub.ui.HistoryActivity
 import com.bfbai.superhub.utils.Detection
 import com.bfbai.superhub.utils.HistoryRepository
+import com.bfbai.superhub.utils.ImageStore
 import com.bfbai.superhub.utils.ItemKind
 import com.bfbai.superhub.utils.SmartDetector
+import com.bfbai.superhub.utils.Thumbs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,38 +52,41 @@ data class ShelfItem(
     val text: String,
     val source: String,
     val timestamp: Long = System.currentTimeMillis(),
-    var isPinned: Boolean = false
+    var isPinned: Boolean = false,
+    val imagePath: String? = null
 )
 
 internal fun withAlpha(color: Int, alpha: Int): Int = (alpha shl 24) or (color and 0x00FFFFFF)
 
 /** كل شكل الرف في مكان واحد، وهنوصله بالإعدادات في خطوة قادمة */
 object ShelfStyle {
-    // اللوحة: لون واحد شفاف (من غير تدرج). التدرج خيار.
-    var panelColor: Int = Color.parseColor("#CC0F2147")
+    // الشكل الكلاسيكي (الافتراضي): لوحة كحلي غامقة + كروت زرقاء بحد سماوي
+    var panelColor: Int = Color.parseColor("#E60B1B3A")
     var panelGradient: Boolean = false
     var panelTop: Int = Color.parseColor("#D91A3563")
     var panelBottom: Int = Color.parseColor("#E60A1730")
-    var panelStroke: Int = Color.parseColor("#40FFFFFF")
-    var handleColor: Int = Color.parseColor("#E6102448")
+    var panelStroke: Int = Color.parseColor("#334DE1E1")
+    var handleColor: Int = Color.parseColor("#E60B1B3A")
     var accent: Int = Color.parseColor("#4DE1E1")
-    var textColor: Int = Color.parseColor("#F2F7FF")
+    var textColor: Int = Color.WHITE
     var subTextColor: Int = Color.parseColor("#9FB3D1")
+    var metaColor: Int = Color.parseColor("#4DE1E1")
+    var boldText: Boolean = true
 
     var cornerDp: Float = 18f
     var cardCornerDp: Float = 14f
 
-    // الكروت: فاتحة شفافة بلون واحد من غير تدرج
-    var cardFillColor: Int = Color.WHITE
-    var cardFillAlpha: Int = 0x2E
-    var cardStrokeColor: Int = Color.WHITE
-    var cardStrokeAlpha: Int = 0x40
+    var cardFillColor: Int = Color.parseColor("#1E3A6D")
+    var cardFillAlpha: Int = 0xFF
+    var cardStrokeColor: Int = Color.parseColor("#4DE1E1")
+    var cardStrokeAlpha: Int = 0x55
     // خيارات للإعدادات: لون الكارت من نوعه، والتدرج
     var cardTintByKind: Boolean = false
     var cardGradient: Boolean = false
     var cardGradientEndAlpha: Int = 0x10
     var rotateTextColors: Boolean = false
     var neutralColor: Int = Color.parseColor("#B7C7E4")
+    var imageColor: Int = Color.parseColor("#FF8FB1")
 
     var blurEnabled: Boolean = true
     var blurRadiusDp: Float = 28f
@@ -108,7 +115,36 @@ object ShelfStyle {
         Color.parseColor("#FF8FB1"),
         Color.parseColor("#B8E986")
     )
+
+    // ثيمات جاهزة (للإعدادات لاحقاً): "classic" و "glass"
+    fun applyPreset(name: String) {
+        if (name == "glass") {
+            panelColor = Color.parseColor("#CC0F2147")
+            panelStroke = Color.parseColor("#40FFFFFF")
+            handleColor = Color.parseColor("#E6102448")
+            cardFillColor = Color.WHITE
+            cardFillAlpha = 0x2E
+            cardStrokeColor = Color.WHITE
+            cardStrokeAlpha = 0x40
+            metaColor = Color.parseColor("#9FB3D1")
+            textColor = Color.parseColor("#F2F7FF")
+            boldText = false
+        } else {
+            panelColor = Color.parseColor("#E60B1B3A")
+            panelStroke = Color.parseColor("#334DE1E1")
+            handleColor = Color.parseColor("#E60B1B3A")
+            cardFillColor = Color.parseColor("#1E3A6D")
+            cardFillAlpha = 0xFF
+            cardStrokeColor = Color.parseColor("#4DE1E1")
+            cardStrokeAlpha = 0x55
+            metaColor = Color.parseColor("#4DE1E1")
+            textColor = Color.WHITE
+            boldText = true
+        }
+    }
 }
+
+private const val INTERNAL_DRAG = "hubsync-internal-drag"
 
 @SuppressLint("ClickableViewAccessibility")
 class ShelfController(
@@ -168,7 +204,7 @@ class ShelfController(
             var alive = false
             val expired = ArrayList<ShelfItem>()
             for (item in items) {
-                if (!item.isPinned && detectOf(item.text).kind == ItemKind.OTP) {
+                if (item.imagePath == null && !item.isPinned && detectOf(item.text).kind == ItemKind.OTP) {
                     if (now - item.timestamp >= ShelfStyle.otpTtlMs) expired.add(item) else alive = true
                 }
             }
@@ -378,7 +414,7 @@ class ShelfController(
 
     /**
      * بتخلي نافذة الرف قابلة للتركيز لحظة قصيرة، وده اللي بيسمح لأندرويد نقرا الحافظة.
-     * النتيجة بترجع في onResult: (النص أو null، هل المحتوى حساس)
+     * النتيجة بترجع في onResult: (النص أو null، هل اتجاهلنا المحتوى لأنه حساس أو مش نص)
      */
     fun captureClipboard(onResult: (String?, Boolean) -> Unit) {
         if (!added) {
@@ -402,18 +438,24 @@ class ShelfController(
     private fun attemptCapture(n: Int, wasGone: Boolean, onResult: (String?, Boolean) -> Unit) {
         autoCloseHandler.postDelayed({
             var text: String? = null
-            var sensitive = false
+            var skip = false
             try {
                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = cm.primaryClip
                 if (clip != null && clip.itemCount > 0) {
-                    sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-                        clip.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
-                    text = clip.getItemAt(0).coerceToText(ctx)?.toString()
+                    val d = clip.description
+                    val textual = d == null || d.hasMimeType("text/*")
+                    val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                        d?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
+                    if (sensitive || !textual) {
+                        skip = true
+                    } else {
+                        text = clip.getItemAt(0).coerceToText(ctx)?.toString()
+                    }
                 }
             } catch (e: Exception) {
             }
-            val got = sensitive || !text.isNullOrBlank()
+            val got = skip || !text.isNullOrBlank()
             if (!got && n < 2 && added) {
                 attemptCapture(n + 1, wasGone, onResult)
             } else {
@@ -425,7 +467,7 @@ class ShelfController(
                     } catch (e: Exception) {
                     }
                 }
-                onResult(text, sensitive)
+                onResult(text, skip)
             }
         }, if (n == 0) 140L else 220L)
     }
@@ -441,24 +483,32 @@ class ShelfController(
         return d
     }
 
+    // ---------- السحب والإفلات ----------
+
+    private fun isAcceptable(d: ClipDescription?): Boolean =
+        d != null && (d.hasMimeType("text/*") || d.hasMimeType("image/*"))
+
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
-                val hasText = e.clipDescription?.hasMimeType("text/*") == true
-                if (hasText) {
-                    dropped = false
-                    dragFromHidden = userHidden
+                dropped = false
+                dragFromHidden = userHidden
+                // سحب خارج من الرف نفسه: مش بنقبله تاني
+                if (e.localState == INTERNAL_DRAG) return false
+                if (isAcceptable(e.clipDescription)) {
                     setExpanded(true)
+                    return true
                 }
-                return hasText
+                return false
             }
 
             DragEvent.ACTION_DROP -> {
                 dropped = true
-                e.clipData?.let { cd ->
+                val cd = e.clipData
+                if (cd != null) {
+                    val open = !dragFromHidden
                     for (i in 0 until cd.itemCount) {
-                        cd.getItemAt(i).coerceToText(ctx)?.toString()
-                            ?.let { add(it, appNameProvider?.invoke() ?: "سحب", popUp = !dragFromHidden) }
+                        handleDropped(cd.getItemAt(i), cd.description, open)
                     }
                 }
             }
@@ -475,6 +525,41 @@ class ShelfController(
             }
         }
         return true
+    }
+
+    private fun handleDropped(item: ClipData.Item, desc: ClipDescription?, open: Boolean) {
+        val uri = item.uri
+        val imageMime = desc?.hasMimeType("image/*") == true
+        var isImage = false
+        if (uri != null) {
+            isImage = imageMime || try {
+                ctx.contentResolver.getType(uri)?.startsWith("image/") == true
+            } catch (e: Exception) {
+                false
+            }
+        }
+
+        if (isImage && uri != null) {
+            val src = appNameProvider?.invoke() ?: "سحب"
+            Thread {
+                val path = ImageStore.saveFromUri(ctx, uri)
+                autoCloseHandler.post {
+                    if (path != null) {
+                        HistoryRepository.addImage(path, src)
+                        if (open) popOpen()
+                    } else {
+                        Toast.makeText(
+                            ctx,
+                            "التطبيق ده ما سمحش بقراءة الصورة. استخدم المشاركة (Share)",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }.start()
+        } else {
+            val t = item.coerceToText(ctx)?.toString()
+            if (t != null) add(t, appNameProvider?.invoke() ?: "سحب", popUp = open)
+        }
     }
 
     private fun animateDisappear() {
@@ -498,7 +583,7 @@ class ShelfController(
         anim.start()
     }
 
-    // زجاجي: لون واحد شفاف (التدرج خيار) + حد خفيف. والمطوي لون المقبض
+    // لون واحد شفاف (التدرج خيار) + حد خفيف. والمطوي لون المقبض
     private fun updateBackground() {
         val r = ShelfStyle.cornerDp * dp
         val bg = GradientDrawable()
@@ -574,6 +659,12 @@ class ShelfController(
     // موجودة عشان أي كود قديم ينادي عليها ما يقعش في البناء
     fun pasteFromClipboard() {
         show()
+        setExpanded(true)
+    }
+
+    // يفتح الرف (ويظهره لو كان مخفي)
+    fun popOpen() {
+        if (!added || userHidden) show()
         setExpanded(true)
     }
 
@@ -721,6 +812,14 @@ class ShelfController(
         Toast.makeText(ctx, "تم النسخ", Toast.LENGTH_SHORT).show()
     }
 
+    private fun copyImage(path: String) {
+        if (ImageStore.copyImage(ctx, path)) {
+            Toast.makeText(ctx, "تم نسخ الصورة، الصقها في المكان اللي عايزه", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(ctx, "تعذر نسخ الصورة", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun startExternal(intent: Intent) {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
@@ -786,21 +885,9 @@ class ShelfController(
         return tv
     }
 
-    private fun buildItem(item: ShelfItem, index: Int): LinearLayout {
-        val det = detectOf(item.text)
-        val color = ShelfStyle.kindColors[det.kind]
-            ?: if (ShelfStyle.rotateTextColors) {
-                ShelfStyle.textPalette[index % ShelfStyle.textPalette.size]
-            } else {
-                ShelfStyle.neutralColor
-            }
-        val pad = (12 * dp).toInt()
+    // ---------- شكل الكروت ----------
 
-        val card = LinearLayout(ctx)
-        card.orientation = LinearLayout.VERTICAL
-        card.setPadding(pad, pad, pad, pad)
-
-        // كارت فاتح شفاف بلون واحد (التدرج ولون النوع خيارات)
+    private fun cardBackground(color: Int): GradientDrawable {
         val fill = if (ShelfStyle.cardTintByKind) {
             withAlpha(color, ShelfStyle.cardFillAlpha)
         } else {
@@ -819,22 +906,32 @@ class ShelfController(
             bg.setColor(fill)
         }
         bg.setStroke((1 * dp).toInt(), withAlpha(ShelfStyle.cardStrokeColor, ShelfStyle.cardStrokeAlpha))
-        card.background = bg
+        return bg
+    }
 
-        val cardParams = LinearLayout.LayoutParams(
+    private fun cardLayoutParams(): LinearLayout.LayoutParams {
+        val p = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        cardParams.setMargins(0, 0, 0, (10 * dp).toInt())
-        card.layoutParams = cardParams
+        p.setMargins(0, 0, 0, (10 * dp).toInt())
+        return p
+    }
 
-        // الصف الأول: شارة النوع + (عد تنازلي للـ OTP) + النجمة + حذف
+    // الصف الأول: شارة النوع + (عد تنازلي للـ OTP) + النجمة + حذف
+    private fun buildTopRow(
+        item: ShelfItem,
+        label: String,
+        color: Int,
+        card: View,
+        otp: Boolean
+    ): LinearLayout {
         val top = LinearLayout(ctx)
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL
 
         val chip = TextView(ctx)
-        chip.text = kindLabel(det.kind)
+        chip.text = label
         chip.textSize = 11f
         chip.setTextColor(color)
         chip.setTypeface(null, Typeface.BOLD)
@@ -849,7 +946,7 @@ class ShelfController(
         spacer.layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
         top.addView(spacer)
 
-        if (det.kind == ItemKind.OTP && !item.isPinned) {
+        if (otp && !item.isPinned) {
             val cd = TextView(ctx)
             cd.textSize = 11f
             cd.setTextColor(ShelfStyle.subTextColor)
@@ -875,7 +972,71 @@ class ShelfController(
         delBtn.setPadding((12 * dp).toInt(), 0, 0, 0)
         delBtn.setOnClickListener { deleteItem(item, card) }
         top.addView(delBtn)
-        card.addView(top)
+        return top
+    }
+
+    private fun buildMeta(item: ShelfItem): TextView {
+        val meta = TextView(ctx)
+        meta.text = "${item.source} • ${timeFormat.format(Date(item.timestamp))}"
+        meta.setTextColor(ShelfStyle.metaColor)
+        meta.textSize = 11f
+        return meta
+    }
+
+    private fun newActionsRow(): LinearLayout {
+        val actions = LinearLayout(ctx)
+        actions.orientation = LinearLayout.HORIZONTAL
+        val p = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        p.topMargin = (10 * dp).toInt()
+        actions.layoutParams = p
+        return actions
+    }
+
+    // السحب للجانب بيحذف (إلا المثبّت)
+    private fun attachSwipeDelete(card: View, item: ShelfItem) {
+        val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
+                if (e1 == null) return false
+                val diffX = e2.x - e1.x
+                val diffY = e2.y - e1.y
+                if (abs(diffX) > 80 && abs(velocityX) > 80 && abs(diffX) > abs(diffY)) {
+                    deleteItem(item, card)
+                    return true
+                }
+                return false
+            }
+        })
+        card.setOnTouchListener { _, event ->
+            gestureDetector.onTouchEvent(event)
+            resetAutoClose()
+            false
+        }
+    }
+
+    private fun buildItem(item: ShelfItem, index: Int): LinearLayout {
+        if (item.imagePath != null) return buildImageCard(item)
+
+        val det = detectOf(item.text)
+        val color = ShelfStyle.kindColors[det.kind]
+            ?: if (ShelfStyle.rotateTextColors) {
+                ShelfStyle.textPalette[index % ShelfStyle.textPalette.size]
+            } else {
+                ShelfStyle.neutralColor
+            }
+        val pad = (12 * dp).toInt()
+
+        val card = LinearLayout(ctx)
+        card.orientation = LinearLayout.VERTICAL
+        card.setPadding(pad, pad, pad, pad)
+        card.background = cardBackground(color)
+        card.layoutParams = cardLayoutParams()
+
+        card.addView(buildTopRow(item, kindLabel(det.kind), color, card, det.kind == ItemKind.OTP))
 
         // المحتوى (بنعرض أول جزء بس من النص الطويل)
         val content = TextView(ctx)
@@ -894,29 +1055,17 @@ class ShelfController(
             }
             content.text = shown
             content.setTextColor(ShelfStyle.textColor)
+            content.setTypeface(null, if (ShelfStyle.boldText) Typeface.BOLD else Typeface.NORMAL)
             content.textSize = 14f
             content.maxLines = 3
             content.ellipsize = android.text.TextUtils.TruncateAt.END
         }
         content.setPadding(0, (6 * dp).toInt(), 0, (2 * dp).toInt())
         card.addView(content)
-
-        val meta = TextView(ctx)
-        meta.text = "${item.source} • ${timeFormat.format(Date(item.timestamp))}"
-        meta.setTextColor(ShelfStyle.subTextColor)
-        meta.textSize = 11f
-        card.addView(meta)
+        card.addView(buildMeta(item))
 
         // أزرار الإجراء حسب النوع
-        val actions = LinearLayout(ctx)
-        actions.orientation = LinearLayout.HORIZONTAL
-        val actionsParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            LinearLayout.LayoutParams.WRAP_CONTENT
-        )
-        actionsParams.topMargin = (10 * dp).toInt()
-        actions.layoutParams = actionsParams
-
+        val actions = newActionsRow()
         when (det.kind) {
             ItemKind.OTP -> {
                 actions.addView(pill("نسخ الكود", color, true) { copyText(det.value) })
@@ -947,26 +1096,7 @@ class ShelfController(
         }
         if (actions.childCount > 0) card.addView(actions)
 
-        // السحب للجانب بيحذف (إلا المثبّت)
-        val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
-
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (e1 == null) return false
-                val diffX = e2.x - e1.x
-                val diffY = e2.y - e1.y
-                if (abs(diffX) > 80 && abs(velocityX) > 80 && abs(diffX) > abs(diffY)) {
-                    deleteItem(item, card)
-                    return true
-                }
-                return false
-            }
-        })
-        card.setOnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            resetAutoClose()
-            false
-        }
+        attachSwipeDelete(card, item)
 
         // الضغط على الكارت بيدخل النص في الخانة المفتوحة (للكود: الرقم نفسه بس)
         val payload = if (det.kind == ItemKind.OTP) det.value else item.text
@@ -976,7 +1106,73 @@ class ShelfController(
         }
         card.setOnLongClickListener { v: View ->
             val clip = ClipData.newPlainText("hubsync", payload)
-            v.startDragAndDrop(clip, View.DragShadowBuilder(v), null, View.DRAG_FLAG_GLOBAL)
+            v.startDragAndDrop(clip, View.DragShadowBuilder(v), INTERNAL_DRAG, View.DRAG_FLAG_GLOBAL)
+        }
+        return card
+    }
+
+    private fun buildImageCard(item: ShelfItem): LinearLayout {
+        val path = item.imagePath ?: return LinearLayout(ctx)
+        val color = ShelfStyle.imageColor
+        val pad = (12 * dp).toInt()
+
+        val card = LinearLayout(ctx)
+        card.orientation = LinearLayout.VERTICAL
+        card.setPadding(pad, pad, pad, pad)
+        card.background = cardBackground(color)
+        card.layoutParams = cardLayoutParams()
+
+        card.addView(buildTopRow(item, "صورة", color, card, false))
+
+        val iv = ImageView(ctx)
+        iv.scaleType = ImageView.ScaleType.CENTER_CROP
+        iv.tag = path
+        iv.background = GradientDrawable().apply {
+            cornerRadius = 10 * dp
+            setColor(Color.parseColor("#22FFFFFF"))
+        }
+        iv.clipToOutline = true
+        val ivp = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            (150 * dp).toInt()
+        )
+        ivp.topMargin = (8 * dp).toInt()
+        ivp.bottomMargin = (6 * dp).toInt()
+        iv.layoutParams = ivp
+        Thumbs.load(path, 520) { bmp ->
+            if (iv.tag == path && bmp != null) iv.setImageBitmap(bmp)
+        }
+        card.addView(iv)
+
+        card.addView(buildMeta(item))
+
+        val actions = newActionsRow()
+        actions.addView(pill("مشاركة", color, true) {
+            startExternal(ImageStore.shareIntent(ctx, path))
+        })
+        actions.addView(pill("نسخ", color, false) { copyImage(path) })
+        card.addView(actions)
+
+        attachSwipeDelete(card, item)
+
+        card.setOnClickListener {
+            copyImage(path)
+            setExpanded(false)
+        }
+        // سحب الصورة لتطبيق تاني (بيشتغل لو التطبيق الهدف بيقبل صور)
+        card.setOnLongClickListener { v: View ->
+            try {
+                val uri = ImageStore.uriFor(ctx, path)
+                val clip = ClipData.newUri(ctx.contentResolver, "hubsync-image", uri)
+                v.startDragAndDrop(
+                    clip,
+                    View.DragShadowBuilder(v),
+                    INTERNAL_DRAG,
+                    View.DRAG_FLAG_GLOBAL or View.DRAG_FLAG_GLOBAL_URI_READ
+                )
+            } catch (e: Exception) {
+                false
+            }
         }
         return card
     }
