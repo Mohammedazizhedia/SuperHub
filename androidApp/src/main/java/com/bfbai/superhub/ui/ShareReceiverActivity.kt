@@ -10,6 +10,9 @@ import com.bfbai.superhub.service.ClipboardAccessibilityService
 import com.bfbai.superhub.utils.HistoryRepository
 import com.bfbai.superhub.utils.ImageStore
 
+// رسائل التشخيص المؤقتة
+private const val SHARE_DEBUG = true
+
 class ShareReceiverActivity : Activity() {
 
     private var pending = 0
@@ -31,14 +34,37 @@ class ShareReceiverActivity : Activity() {
 
         when (i.action) {
             Intent.ACTION_SEND -> {
-                val u = streamUri(i)
+                var u = streamUri(i)
+                if (u == null) {
+                    val cd = i.clipData
+                    if (cd != null && cd.itemCount > 0) u = cd.getItemAt(0).uri
+                }
                 if (u != null && isImage(i.type, u)) {
                     uris.add(u)
                 } else {
                     text = i.getStringExtra(Intent.EXTRA_TEXT)
                 }
             }
-            Intent.ACTION_SEND_MULTIPLE -> uris.addAll(streamUris(i))
+            Intent.ACTION_SEND_MULTIPLE -> {
+                uris.addAll(streamUris(i))
+                if (uris.isEmpty()) {
+                    val cd = i.clipData
+                    if (cd != null) {
+                        for (k in 0 until cd.itemCount) {
+                            val u = cd.getItemAt(k).uri
+                            if (u != null) uris.add(u)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (SHARE_DEBUG) {
+            Toast.makeText(
+                this,
+                "HubSync: استلمت مشاركة | ${i.action?.substringAfterLast('.')} | ${i.type} | صور=${uris.size}",
+                Toast.LENGTH_LONG
+            ).show()
         }
 
         val t = text
@@ -71,7 +97,8 @@ class ShareReceiverActivity : Activity() {
             Toast.makeText(this, "اتحفظ في HubSync", Toast.LENGTH_SHORT).show()
             ClipboardAccessibilityService.instance?.popShelf()
         } else {
-            Toast.makeText(this, "مقدرتش أحفظ المشاركة (الملف مش صورة أو مش مقروء)", Toast.LENGTH_LONG).show()
+            val why = ImageStore.lastError ?: "مفيش نص ولا صورة في المشاركة"
+            Toast.makeText(this, "مقدرتش أحفظ المشاركة: $why", Toast.LENGTH_LONG).show()
         }
         finish()
     }
