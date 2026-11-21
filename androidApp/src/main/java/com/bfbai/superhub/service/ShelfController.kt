@@ -18,6 +18,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.DragEvent
 import android.view.GestureDetector
 import android.view.Gravity
@@ -58,9 +59,9 @@ data class ShelfItem(
 
 internal fun withAlpha(color: Int, alpha: Int): Int = (alpha shl 24) or (color and 0x00FFFFFF)
 
-/** كل شكل الرف في مكان واحد، وهنوصله بالإعدادات في خطوة قادمة */
+/** كل شكل الرف وسلوكه في مكان واحد، وهنوصله بالإعدادات في خطوة قادمة */
 object ShelfStyle {
-    // الشكل الكلاسيكي (الافتراضي): لوحة كحلي غامقة + كروت زرقاء بحد سماوي
+    // الشكل الكلاسيكي (الافتراضي): لوحة كحلي غامقة + كروت زرقاء شفافة بحد سماوي
     var panelColor: Int = Color.parseColor("#E60B1B3A")
     var panelGradient: Boolean = false
     var panelTop: Int = Color.parseColor("#D91A3563")
@@ -76,10 +77,11 @@ object ShelfStyle {
     var cornerDp: Float = 18f
     var cardCornerDp: Float = 14f
 
+    // شفافية الكروت: 0xFF صلب تماماً، 0x59 شفاف نص نص، 0x40 أكتر شفافية، 0x2E زجاجي جداً
     var cardFillColor: Int = Color.parseColor("#1E3A6D")
-    var cardFillAlpha: Int = 0xFF
+    var cardFillAlpha: Int = 0x59
     var cardStrokeColor: Int = Color.parseColor("#4DE1E1")
-    var cardStrokeAlpha: Int = 0x55
+    var cardStrokeAlpha: Int = 0x66
     // خيارات للإعدادات: لون الكارت من نوعه، والتدرج
     var cardTintByKind: Boolean = false
     var cardGradient: Boolean = false
@@ -101,6 +103,12 @@ object ShelfStyle {
 
     // أقصى طول نص بيتعرض في الكارت (النص الكامل بيتحفظ كامل)
     var previewChars: Int = 400
+
+    // السحب بيصحّي الرف ويفتحه (حتى لو مخفي). هيبقى خيار في الإعدادات
+    var dragWakesShelf: Boolean = true
+
+    // رسائل التشخيص المؤقتة
+    var debug: Boolean = true
 
     val kindColors: Map<ItemKind, Int> = mapOf(
         ItemKind.OTP to Color.parseColor("#FFB020"),
@@ -134,9 +142,9 @@ object ShelfStyle {
             panelStroke = Color.parseColor("#334DE1E1")
             handleColor = Color.parseColor("#E60B1B3A")
             cardFillColor = Color.parseColor("#1E3A6D")
-            cardFillAlpha = 0xFF
+            cardFillAlpha = 0x59
             cardStrokeColor = Color.parseColor("#4DE1E1")
-            cardStrokeAlpha = 0x55
+            cardStrokeAlpha = 0x66
             metaColor = Color.parseColor("#4DE1E1")
             textColor = Color.WHITE
             boldText = true
@@ -168,6 +176,7 @@ class ShelfController(
     private var dragFromHidden: Boolean = false
     private var isRightSide: Boolean = true
     private var dropped: Boolean = false
+    private var ignoreOutsideUntil: Long = 0L
 
     var onShownChanged: ((Boolean) -> Unit)? = null
     var appNameProvider: (() -> String)? = null
@@ -320,6 +329,8 @@ class ShelfController(
                 if (userHidden) return false
 
                 if (event.action == MotionEvent.ACTION_OUTSIDE) {
+                    // لمسة بعد ما الرف يتفتح بلحظة (مثلاً ضغطة نسخ) ما تقفلوش
+                    if (SystemClock.uptimeMillis() < ignoreOutsideUntil) return true
                     if (customMenu?.visibility == View.VISIBLE) {
                         hideCustomMenu()
                     } else if (expanded) {
@@ -407,6 +418,10 @@ class ShelfController(
     private fun maxX(): Int = maxOf(0, ctx.resources.displayMetrics.widthPixels - lp.width)
     private fun maxY(): Int = maxOf(0, ctx.resources.displayMetrics.heightPixels - lp.height)
 
+    private fun dbgToast(msg: String) {
+        if (ShelfStyle.debug) Toast.makeText(ctx, "HubSync: $msg", Toast.LENGTH_SHORT).show()
+    }
+
     private fun resetAutoClose() {
         autoCloseHandler.removeCallbacks(autoCloseRunnable)
         if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, ShelfStyle.autoCloseMs)
@@ -414,60 +429,62 @@ class ShelfController(
 
     /**
      * بتخلي نافذة الرف قابلة للتركيز لحظة قصيرة، وده اللي بيسمح لأندرويد نقرا الحافظة.
-     * النتيجة بترجع في onResult: (النص أو null، هل اتجاهلنا المحتوى لأنه حساس أو مش نص)
+     * النتيجة: (نص أو null، رابط صورة أو null، هل اتجاهلنا المحتوى لأنه حساس أو نوع تاني)
      */
-    fun captureClipboard(onResult: (String?, Boolean) -> Unit) {
+    fun captureClipboard(onResult: (String?, Uri?, Boolean) -> Unit) {
         if (!added) {
-            onResult(null, false)
+            onResult(null, null, false)
             return
         }
-        val wasGone = root.visibility == View.GONE
-        if (wasGone) root.visibility = View.INVISIBLE
         lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         try {
             wm.updateViewLayout(root, lp)
         } catch (e: Exception) {
             lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-            if (wasGone) root.visibility = View.GONE
-            onResult(null, false)
+            onResult(null, null, false)
             return
         }
-        attemptCapture(0, wasGone, onResult)
+        attemptCapture(0, onResult)
     }
 
-    private fun attemptCapture(n: Int, wasGone: Boolean, onResult: (String?, Boolean) -> Unit) {
+    private fun attemptCapture(n: Int, onResult: (String?, Uri?, Boolean) -> Unit) {
         autoCloseHandler.postDelayed({
             var text: String? = null
+            var uri: Uri? = null
             var skip = false
             try {
                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = cm.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val d = clip.description
-                    val textual = d == null || d.hasMimeType("text/*")
                     val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
                         d?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
-                    if (sensitive || !textual) {
+                    val first = clip.getItemAt(0)
+                    val u = first.uri
+                    if (sensitive) {
                         skip = true
+                    } else if (d != null && d.hasMimeType("image/*") && u != null) {
+                        uri = u
+                    } else if (d == null || d.hasMimeType("text/*")) {
+                        text = first.coerceToText(ctx)?.toString()
                     } else {
-                        text = clip.getItemAt(0).coerceToText(ctx)?.toString()
+                        skip = true
                     }
                 }
             } catch (e: Exception) {
             }
-            val got = skip || !text.isNullOrBlank()
+            val got = skip || uri != null || !text.isNullOrBlank()
             if (!got && n < 2 && added) {
-                attemptCapture(n + 1, wasGone, onResult)
+                attemptCapture(n + 1, onResult)
             } else {
                 lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 if (added) {
-                    if (wasGone && userHidden) root.visibility = View.GONE
                     try {
                         wm.updateViewLayout(root, lp)
                     } catch (e: Exception) {
                     }
                 }
-                onResult(text, skip)
+                onResult(text, uri, skip)
             }
         }, if (n == 0) 140L else 220L)
     }
@@ -492,18 +509,23 @@ class ShelfController(
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
                 dropped = false
-                dragFromHidden = userHidden
                 // سحب خارج من الرف نفسه: مش بنقبله تاني
                 if (e.localState == INTERNAL_DRAG) return false
-                if (isAcceptable(e.clipDescription)) {
-                    setExpanded(true)
-                    return true
+                val d = e.clipDescription
+                if (!isAcceptable(d)) {
+                    dbgToast("سحب مش نص ولا صورة")
+                    return false
                 }
-                return false
+                if (userHidden && !ShelfStyle.dragWakesShelf) return false
+                dragFromHidden = userHidden
+                dbgToast("بدأ سحب، بفتح الرف")
+                setExpanded(true)
+                return true
             }
 
             DragEvent.ACTION_DROP -> {
                 dropped = true
+                dbgToast("إفلات")
                 val cd = e.clipData
                 if (cd != null) {
                     val open = !dragFromHidden
@@ -550,7 +572,7 @@ class ShelfController(
                     } else {
                         Toast.makeText(
                             ctx,
-                            "التطبيق ده ما سمحش بقراءة الصورة. استخدم المشاركة (Share)",
+                            "التطبيق ده ما سمحش بقراءة الصورة (${ImageStore.lastError ?: "-"}). استخدم المشاركة (Share)",
                             Toast.LENGTH_LONG
                         ).show()
                     }
@@ -629,15 +651,22 @@ class ShelfController(
         userHidden = false
         root.visibility = View.VISIBLE
         root.alpha = 1f
+        if (!expanded) {
+            lp.width = (ShelfStyle.closedWidthDp * dp).toInt()
+            try {
+                wm.updateViewLayout(root, lp)
+            } catch (e: Exception) {
+            }
+        }
         onShownChanged?.invoke(true)
     }
 
-    // الإخفاء بيخلي النافذة موجودة (عشان السحب يفضل شغال) لكن الرف مش ظاهر
+    // الإخفاء: النافذة بتفضل موجودة وظاهرة بس شفافة تماماً وضيقة،
+    // عشان السحب يفضل شغال (النافذة الـ GONE غالباً ما بتستقبلش أحداث السحب)
     fun hide() {
         if (!added) return
         userHidden = true
         setExpanded(false)
-        root.visibility = View.GONE
         onShownChanged?.invoke(false)
     }
 
@@ -682,6 +711,7 @@ class ShelfController(
     fun setExpanded(on: Boolean) {
         expanded = on
         if (on) {
+            ignoreOutsideUntil = SystemClock.uptimeMillis() + 1200
             root.visibility = View.VISIBLE
             root.alpha = 1f
             topBar.visibility = View.VISIBLE
@@ -697,11 +727,12 @@ class ShelfController(
             topBar.visibility = View.GONE
             scroll.visibility = View.GONE
             grip.visibility = View.VISIBLE
-            lp.width = (ShelfStyle.closedWidthDp * dp).toInt()
+            lp.width = if (userHidden) (12 * dp).toInt() else (ShelfStyle.closedWidthDp * dp).toInt()
             lp.height = (ShelfStyle.closedHeightDp * dp).toInt()
             hideCustomMenu()
             autoCloseHandler.removeCallbacks(autoCloseRunnable)
-            if (userHidden) root.visibility = View.GONE
+            root.visibility = View.VISIBLE
+            root.alpha = if (userHidden) 0f else 1f
         }
         updateBackground()
         applyBlur()
