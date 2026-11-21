@@ -72,12 +72,24 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- زرار الكونترول بانل -->
+        <!-- زرار الكونترول بانل: الرف -->
         <service
             android:name=".service.SuperHubTileService"
             android:exported="true"
             android:icon="@drawable/ic_tile_hubsync"
             android:label="HubSync"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- زرار الكونترول بانل: الوضع الخاص -->
+        <service
+            android:name=".service.PrivateModeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_private"
+            android:label="وضع خاص"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
