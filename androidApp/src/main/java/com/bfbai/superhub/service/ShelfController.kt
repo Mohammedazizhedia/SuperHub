@@ -10,7 +10,10 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -20,11 +23,13 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.DragEvent
-import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.view.animation.AccelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -48,13 +53,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.hypot
 
 data class ShelfItem(
     val text: String,
     val source: String,
     val timestamp: Long = System.currentTimeMillis(),
     var isPinned: Boolean = false,
-    val imagePath: String? = null
+    val imagePath: String? = null,
+    val imageHash: String? = null
 )
 
 internal fun withAlpha(color: Int, alpha: Int): Int = (alpha shl 24) or (color and 0x00FFFFFF)
@@ -107,6 +114,17 @@ object ShelfStyle {
     // السحب بيصحّي الرف ويفتحه (حتى لو مخفي). هيبقى خيار في الإعدادات
     var dragWakesShelf: Boolean = true
 
+    // سحب الحذف: لون خلفية الحذف، ونسبة السحب من عرض الكارت اللي بعدها بيتحذف
+    var deleteColor: Int = Color.parseColor("#E53935")
+    var swipeThreshold: Float = 0.4f
+
+    // Throw to close: ترمي الرف بسرعة فيختفي
+    var throwEnabled: Boolean = true
+    // "hide" يخفي الرف بالكامل (بتظهره من الـ Tile)، "collapse" يطويه لشريط
+    var throwAction: String = "hide"
+    // أقل سرعة (dp في الثانية) تعتبر رمي
+    var throwMinSpeedDp: Float = 1200f
+
     // رسائل التشخيص المؤقتة
     var debug: Boolean = true
 
@@ -154,6 +172,142 @@ object ShelfStyle {
 
 private const val INTERNAL_DRAG = "hubsync-internal-drag"
 
+/** أيقونة سلة محذوفات مرسومة بالكود، غطاها بيتفتح مع نسبة السحب */
+private class TrashView(ctx: Context) : View(ctx) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    var progress: Float = 0f
+        set(value) {
+            field = value
+            alpha = value.coerceIn(0f, 1f)
+            invalidate()
+        }
+
+    init {
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.STROKE
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeJoin = Paint.Join.ROUND
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val s = width / 24f
+        val p = progress.coerceIn(0f, 1f)
+        paint.strokeWidth = 2f * s
+
+        canvas.save()
+        val scale = 0.7f + 0.3f * p
+        canvas.scale(scale, scale, width / 2f, height / 2f)
+
+        // جسم السلة
+        val body = Path()
+        body.moveTo(6f * s, 9f * s)
+        body.lineTo(7f * s, 20f * s)
+        body.quadTo(7.1f * s, 21f * s, 8.2f * s, 21f * s)
+        body.lineTo(15.8f * s, 21f * s)
+        body.quadTo(16.9f * s, 21f * s, 17f * s, 20f * s)
+        body.lineTo(18f * s, 9f * s)
+        canvas.drawPath(body, paint)
+        canvas.drawLine(10f * s, 12f * s, 10f * s, 18f * s, paint)
+        canvas.drawLine(14f * s, 12f * s, 14f * s, 18f * s, paint)
+
+        // الغطا بيتفتح مع السحب
+        canvas.save()
+        canvas.rotate(-28f * p, 19f * s, 6f * s)
+        canvas.drawLine(4f * s, 6f * s, 20f * s, 6f * s, paint)
+        canvas.drawLine(9.5f * s, 6f * s, 10.3f * s, 3.6f * s, paint)
+        canvas.drawLine(10.3f * s, 3.6f * s, 13.7f * s, 3.6f * s, paint)
+        canvas.drawLine(13.7f * s, 3.6f * s, 14.5f * s, 6f * s, paint)
+        canvas.restore()
+
+        canvas.restore()
+    }
+}
+
+/** حاوية بتتحرك فيها الواجهة الأمامية (الكارت) مع السحب الأفقي، والخلفية الحمراء بتظهر تدريجياً */
+private class SwipeLayout(ctx: Context) : FrameLayout(ctx) {
+    var swipeEnabled: Boolean = true
+    var thresholdFraction: Float = 0.4f
+    var onProgress: ((Float, Int) -> Unit)? = null
+    var onDismiss: (() -> Unit)? = null
+
+    private val slop: Int = ViewConfiguration.get(ctx).scaledTouchSlop
+    private val density: Float = ctx.resources.displayMetrics.density
+    private var downX = 0f
+    private var downY = 0f
+    private var dragging = false
+    private var tracker: VelocityTracker? = null
+
+    private fun front(): View? = if (childCount > 0) getChildAt(childCount - 1) else null
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (!swipeEnabled) return false
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                downX = ev.x
+                downY = ev.y
+                dragging = false
+                tracker?.recycle()
+                tracker = VelocityTracker.obtain()
+                tracker?.addMovement(ev)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                tracker?.addMovement(ev)
+                val dx = ev.x - downX
+                val dy = ev.y - downY
+                if (!dragging && abs(dx) > slop * 1.5f && abs(dx) > abs(dy) * 1.4f) {
+                    dragging = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (!dragging) {
+                    tracker?.recycle()
+                    tracker = null
+                }
+            }
+        }
+        return dragging
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!dragging) return super.onTouchEvent(event)
+        tracker?.addMovement(event)
+        val f = front() ?: return true
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - downX
+                f.translationX = dx
+                val p = (abs(dx) / (width * thresholdFraction).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                onProgress?.invoke(p, if (dx >= 0) 1 else -1)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                tracker?.computeCurrentVelocity(1000)
+                val vx = tracker?.xVelocity ?: 0f
+                tracker?.recycle()
+                tracker = null
+                dragging = false
+                val dx = f.translationX
+                val fast = abs(vx) > 900f * density && abs(dx) > 40f * density && ((vx > 0) == (dx > 0))
+                val past = abs(dx) > width * thresholdFraction || fast
+                if (event.actionMasked == MotionEvent.ACTION_UP && past) {
+                    val dir = if (dx >= 0) 1f else -1f
+                    f.animate()
+                        .translationX(dir * width)
+                        .alpha(0f)
+                        .setDuration(160)
+                        .withEndAction { onDismiss?.invoke() }
+                        .start()
+                } else {
+                    f.animate().translationX(0f).setDuration(180).start()
+                    onProgress?.invoke(0f, 1)
+                }
+            }
+        }
+        return true
+    }
+}
+
 @SuppressLint("ClickableViewAccessibility")
 class ShelfController(
     private val ctx: Context,
@@ -177,6 +331,7 @@ class ShelfController(
     private var isRightSide: Boolean = true
     private var dropped: Boolean = false
     private var ignoreOutsideUntil: Long = 0L
+    private var tracker: VelocityTracker? = null
 
     var onShownChanged: ((Boolean) -> Unit)? = null
     var appNameProvider: (() -> String)? = null
@@ -350,12 +505,17 @@ class ShelfController(
                         isDragging = false
                         isLongPressed = false
 
+                        tracker?.recycle()
+                        tracker = VelocityTracker.obtain()
+                        track(event)
+
                         resetAutoClose()
                         autoCloseHandler.postDelayed(longPressRunnable, 600)
                         return true
                     }
 
                     MotionEvent.ACTION_MOVE -> {
+                        track(event)
                         val deltaX = (event.rawX - initialTouchX).toInt()
                         val deltaY = (event.rawY - initialTouchY).toInt()
 
@@ -375,8 +535,28 @@ class ShelfController(
 
                     MotionEvent.ACTION_UP -> {
                         autoCloseHandler.removeCallbacks(longPressRunnable)
+                        track(event)
 
-                        if (isLongPressed) return true
+                        if (isLongPressed) {
+                            releaseTracker()
+                            return true
+                        }
+
+                        // Throw to close: لو سيبت الرف بسرعة عالية يطير ويختفي
+                        if (isDragging && ShelfStyle.throwEnabled) {
+                            val t = tracker
+                            if (t != null) {
+                                t.computeCurrentVelocity(1000)
+                                val vx = t.xVelocity
+                                val vy = t.yVelocity
+                                if (hypot(vx, vy) > ShelfStyle.throwMinSpeedDp * dp) {
+                                    releaseTracker()
+                                    throwAway(vx, vy)
+                                    return true
+                                }
+                            }
+                        }
+                        releaseTracker()
 
                         if (isDragging) {
                             val midPoint = ctx.resources.displayMetrics.widthPixels / 2
@@ -405,6 +585,7 @@ class ShelfController(
 
                     MotionEvent.ACTION_CANCEL -> {
                         autoCloseHandler.removeCallbacks(longPressRunnable)
+                        releaseTracker()
                         return true
                     }
                 }
@@ -425,6 +606,67 @@ class ShelfController(
     private fun resetAutoClose() {
         autoCloseHandler.removeCallbacks(autoCloseRunnable)
         if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, ShelfStyle.autoCloseMs)
+    }
+
+    // ---------- Throw to close ----------
+
+    // الإحداثيات الخام (rawX/rawY)، لأن النافذة نفسها بتتحرك مع الإصبع
+    private fun track(e: MotionEvent) {
+        val t = tracker ?: return
+        val c = MotionEvent.obtain(e)
+        c.setLocation(e.rawX, e.rawY)
+        t.addMovement(c)
+        c.recycle()
+    }
+
+    private fun releaseTracker() {
+        tracker?.recycle()
+        tracker = null
+    }
+
+    private fun throwAway(vx: Float, vy: Float) {
+        if (!added) return
+        val dm = ctx.resources.displayMetrics
+        val horizontal = abs(vx) >= abs(vy)
+        val dirX = if (horizontal) (if (vx > 0) 1f else -1f) else 0f
+        val dirY = if (!horizontal) (if (vy > 0) 1f else -1f) else 0f
+        val baseX = lp.x
+        val baseY = lp.y
+        val travelX = (dm.widthPixels + lp.width).toFloat()
+        val travelY = (dm.heightPixels + lp.height).toFloat()
+
+        autoCloseHandler.removeCallbacks(autoCloseRunnable)
+        hideCustomMenu()
+
+        val anim = ValueAnimator.ofFloat(0f, 1f)
+        anim.duration = 260
+        anim.interpolator = AccelerateInterpolator(1.4f)
+        anim.addUpdateListener { a ->
+            if (!added) return@addUpdateListener
+            val t = a.animatedValue as Float
+            val dx = dirX * travelX * t
+            lp.x = (if (isRightSide) baseX - dx else baseX + dx).toInt()
+            lp.y = (baseY + dirY * travelY * t).toInt()
+            root.alpha = 1f - t
+            try {
+                wm.updateViewLayout(root, lp)
+            } catch (e: Exception) {
+            }
+        }
+        anim.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                lp.x = baseX
+                lp.y = baseY
+                root.alpha = 1f
+                if (ShelfStyle.throwAction == "collapse") {
+                    setExpanded(false)
+                } else {
+                    hide()
+                    dbgToast("الرف اتخبى، دوس على الـ Tile لإظهاره")
+                }
+            }
+        })
+        anim.start()
     }
 
     /**
@@ -674,6 +916,7 @@ class ShelfController(
         onShownChanged = null
         onOpenedByUser = null
         autoCloseHandler.removeCallbacksAndMessages(null)
+        releaseTracker()
         scope.cancel()
         if (added) {
             try {
@@ -876,13 +1119,20 @@ class ShelfController(
         ItemKind.TEXT -> "نص"
     }
 
-    // حذف فوري: بنشيل الكارت من الشاشة الأول وبعدين من المخزن
+    // حذف بزرار ✕: بنشيل الكارت (وحاويته) من الشاشة الأول وبعدين من المخزن
     private fun deleteItem(item: ShelfItem, card: View) {
         if (item.isPinned) {
             Toast.makeText(ctx, "ألغِ التثبيت الأول", Toast.LENGTH_SHORT).show()
             return
         }
-        list.removeView(card)
+        val container = (card.parent as? View) ?: card
+        list.removeView(container)
+        HistoryRepository.remove(item)
+    }
+
+    // حذف بالسحب
+    private fun dismissItem(item: ShelfItem, container: View) {
+        list.removeView(container)
         HistoryRepository.remove(item)
     }
 
@@ -1026,30 +1276,57 @@ class ShelfController(
         return actions
     }
 
-    // السحب للجانب بيحذف (إلا المثبّت)
-    private fun attachSwipeDelete(card: View, item: ShelfItem) {
-        val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onDown(e: MotionEvent): Boolean = true
+    // بيلف الكارت في حاوية سحب: خلفية حمراء + سلة محذوفات بتظهر تدريجياً مع السحب
+    private fun wrapSwipe(card: View, item: ShelfItem): View {
+        val frame = SwipeLayout(ctx)
+        frame.layoutParams = cardLayoutParams()
+        frame.swipeEnabled = !item.isPinned
+        frame.thresholdFraction = ShelfStyle.swipeThreshold
 
-            override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-                if (e1 == null) return false
-                val diffX = e2.x - e1.x
-                val diffY = e2.y - e1.y
-                if (abs(diffX) > 80 && abs(velocityX) > 80 && abs(diffX) > abs(diffY)) {
-                    deleteItem(item, card)
-                    return true
-                }
-                return false
-            }
-        })
-        card.setOnTouchListener { _, event ->
-            gestureDetector.onTouchEvent(event)
-            resetAutoClose()
-            false
+        val redBg = View(ctx)
+        redBg.background = GradientDrawable().apply {
+            cornerRadius = ShelfStyle.cardCornerDp * dp
+            setColor(ShelfStyle.deleteColor)
         }
+        redBg.alpha = 0f
+        frame.addView(
+            redBg,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        val trash = TrashView(ctx)
+        val size = (30 * dp).toInt()
+        val tp = FrameLayout.LayoutParams(size, size, Gravity.CENTER_VERTICAL or Gravity.LEFT)
+        tp.leftMargin = (20 * dp).toInt()
+        tp.rightMargin = (20 * dp).toInt()
+        trash.layoutParams = tp
+        trash.progress = 0f
+        frame.addView(trash)
+
+        card.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        )
+        frame.addView(card)
+
+        frame.onProgress = { p, dir ->
+            redBg.alpha = p * 0.92f
+            trash.progress = p
+            val params = trash.layoutParams as FrameLayout.LayoutParams
+            val g = Gravity.CENTER_VERTICAL or (if (dir > 0) Gravity.LEFT else Gravity.RIGHT)
+            if (params.gravity != g) {
+                params.gravity = g
+                trash.layoutParams = params
+            }
+        }
+        frame.onDismiss = { dismissItem(item, frame) }
+        return frame
     }
 
-    private fun buildItem(item: ShelfItem, index: Int): LinearLayout {
+    private fun buildItem(item: ShelfItem, index: Int): View {
         if (item.imagePath != null) return buildImageCard(item)
 
         val det = detectOf(item.text)
@@ -1065,7 +1342,6 @@ class ShelfController(
         card.orientation = LinearLayout.VERTICAL
         card.setPadding(pad, pad, pad, pad)
         card.background = cardBackground(color)
-        card.layoutParams = cardLayoutParams()
 
         card.addView(buildTopRow(item, kindLabel(det.kind), color, card, det.kind == ItemKind.OTP))
 
@@ -1127,8 +1403,6 @@ class ShelfController(
         }
         if (actions.childCount > 0) card.addView(actions)
 
-        attachSwipeDelete(card, item)
-
         // الضغط على الكارت بيدخل النص في الخانة المفتوحة (للكود: الرقم نفسه بس)
         val payload = if (det.kind == ItemKind.OTP) det.value else item.text
         card.setOnClickListener {
@@ -1139,10 +1413,10 @@ class ShelfController(
             val clip = ClipData.newPlainText("hubsync", payload)
             v.startDragAndDrop(clip, View.DragShadowBuilder(v), INTERNAL_DRAG, View.DRAG_FLAG_GLOBAL)
         }
-        return card
+        return wrapSwipe(card, item)
     }
 
-    private fun buildImageCard(item: ShelfItem): LinearLayout {
+    private fun buildImageCard(item: ShelfItem): View {
         val path = item.imagePath ?: return LinearLayout(ctx)
         val color = ShelfStyle.imageColor
         val pad = (12 * dp).toInt()
@@ -1151,7 +1425,6 @@ class ShelfController(
         card.orientation = LinearLayout.VERTICAL
         card.setPadding(pad, pad, pad, pad)
         card.background = cardBackground(color)
-        card.layoutParams = cardLayoutParams()
 
         card.addView(buildTopRow(item, "صورة", color, card, false))
 
@@ -1184,8 +1457,6 @@ class ShelfController(
         actions.addView(pill("نسخ", color, false) { copyImage(path) })
         card.addView(actions)
 
-        attachSwipeDelete(card, item)
-
         card.setOnClickListener {
             copyImage(path)
             setExpanded(false)
@@ -1205,6 +1476,6 @@ class ShelfController(
                 false
             }
         }
-        return card
+        return wrapSwipe(card, item)
     }
 }
