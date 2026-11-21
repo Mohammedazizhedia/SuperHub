@@ -22,6 +22,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
 import com.bfbai.superhub.utils.HistoryRepository
 import com.bfbai.superhub.utils.ImageStore
+import com.bfbai.superhub.utils.PrivacyPolicy
 
 class ClipboardAccessibilityService : AccessibilityService() {
 
@@ -45,7 +46,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
     private var lastRealApp: String? = null
-    private var triggerApp: String? = null
+    private var triggerPkg: String? = null
     private var triggerAt: Long = 0L
     private var ignoreClipUntil: Long = 0L
 
@@ -84,7 +85,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     // التقاط يدوي للحافظة (ممكن يتنادى من أي زرار أو إشعار)
     fun pasteFromShelf() {
-        requestCapture(manual = true, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
+        requestCapture(
+            manual = true, passive = true,
+            expectChange = false, acceptUnchanged = true, maxAttempts = 2
+        )
     }
 
     private fun dbg(msg: String) {
@@ -121,17 +125,21 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun markTrigger(app: String) {
-        triggerApp = app
+    private fun markTrigger(pkg: String) {
+        triggerPkg = pkg
         triggerAt = SystemClock.uptimeMillis()
     }
 
-    // مصدر النسخ: التطبيق اللي حصلت فيه ضغطة النسخ (لو لسه جديدة)، وإلا التطبيق اللي قدامك
-    // دلوقتي، وإلا آخر تطبيق حقيقي كنت فيه (مش اللانشر)
-    private fun sourceName(): String {
-        val t = triggerApp
+    // مصدر النسخ (الحزمة): التطبيق اللي حصلت فيه ضغطة النسخ (لو لسه جديدة)،
+    // وإلا التطبيق اللي قدامك دلوقتي، وإلا آخر تطبيق حقيقي كنت فيه (مش اللانشر)
+    private fun sourcePackage(): String? {
+        val t = triggerPkg
         if (t != null && SystemClock.uptimeMillis() - triggerAt < TRIGGER_WINDOW) return t
-        val p = currentForegroundPackage() ?: lastRealApp
+        return currentForegroundPackage() ?: lastRealApp
+    }
+
+    private fun sourceName(): String {
+        val p = sourcePackage()
         return if (p != null) labelFor(p) else "تطبيق"
     }
 
@@ -150,6 +158,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         instance = this
         Log.d("ClipboardService", "Service Connected")
 
+        PrivacyPolicy.init(this)
         HistoryRepository.init(this)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
@@ -165,7 +174,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
             }
             // لما تدوس على مقبض الرف: نقرا الحافظة (المسار اليدوي المضمون)
             shelf?.onOpenedByUser = {
-                requestCapture(manual = true, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
+                requestCapture(
+                    manual = true, passive = true,
+                    expectChange = false, acceptUnchanged = true, maxAttempts = 2
+                )
             }
             shelf?.show()
         }
@@ -179,10 +191,17 @@ class ClipboardAccessibilityService : AccessibilityService() {
             // لو مفيش ضغطة نسخ جديدة اتشافت، المصدر هو التطبيق اللي قدامك دلوقتي
             if (SystemClock.uptimeMillis() - triggerAt > TRIGGER_WINDOW) {
                 val p = currentForegroundPackage() ?: lastRealApp
-                if (p != null) markTrigger(labelFor(p))
+                if (p != null) markTrigger(p)
+            }
+            if (!PrivacyPolicy.allowsCapture(sourcePackage())) {
+                dbg("الالتقاط متوقف (وضع خاص أو تطبيق مستثنى)")
+                return@OnPrimaryClipChangedListener
             }
             if (!readDirect()) {
-                requestCapture(manual = false, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
+                requestCapture(
+                    manual = false, passive = false,
+                    expectChange = false, acceptUnchanged = true, maxAttempts = 2
+                )
             }
         }
         clipListener = l
@@ -205,9 +224,12 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 val uri = first.uri
                 if (d != null && d.hasMimeType("image/*") && uri != null) {
                     // لو القراءة فشلت أو طلعت نفس الصورة القديمة، نجرب بالتركيز
-                    acceptImage(uri) { sameOrFail ->
+                    acceptImage(uri, passive = false, manual = false) { sameOrFail ->
                         if (sameOrFail) {
-                            requestCapture(manual = false, expectChange = true, acceptUnchanged = true, maxAttempts = 2)
+                            requestCapture(
+                                manual = false, passive = false,
+                                expectChange = true, acceptUnchanged = true, maxAttempts = 2
+                            )
                         }
                     }
                     return true
@@ -215,7 +237,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 if (d == null || d.hasMimeType("text/*")) {
                     val text = first.coerceToText(this)?.toString()
                     if (!text.isNullOrBlank()) {
-                        acceptText(text)
+                        acceptText(text, passive = false, manual = false)
                         return true
                     }
                 } else {
@@ -228,7 +250,20 @@ class ClipboardAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private fun acceptText(text: String) {
+    /**
+     * passive: التقاط سلبي (زي لمسة مقبض الرف): لو النص هو اللي المستخدم مسحه من شوية بنتجاهله.
+     * manual: طلب صريح من المستخدم (لمسة المقبض): بيتخطى الوضع الخاص والاستثناءات.
+     */
+    private fun acceptText(text: String, passive: Boolean, manual: Boolean) {
+        if (passive && text == HistoryRepository.dismissedText) {
+            dbg("النص ده اتمسح قبل كده، اتجاهلته")
+            return
+        }
+        if (!manual && !PrivacyPolicy.allowsCapture(sourcePackage())) {
+            dbg("الالتقاط متوقف (وضع خاص أو تطبيق مستثنى)")
+            return
+        }
+        HistoryRepository.dismissedText = null
         lastCaptured = text
         val src = sourceName()
         shelf?.add(text, src)
@@ -239,7 +274,12 @@ class ClipboardAccessibilityService : AccessibilityService() {
      * بتحفظ الصورة وبتقارن بصمتها بآخر صورة اتسجلت.
      * onFinished(true) معناها: فشلت القراءة أو طلعت نفس الصورة القديمة (غالباً الحافظة لسه ما اتحدثتش).
      */
-    private fun acceptImage(uri: Uri, onFinished: (Boolean) -> Unit) {
+    private fun acceptImage(uri: Uri, passive: Boolean, manual: Boolean, onFinished: (Boolean) -> Unit) {
+        if (!manual && !PrivacyPolicy.allowsCapture(sourcePackage())) {
+            dbg("الالتقاط متوقف (وضع خاص أو تطبيق مستثنى)")
+            onFinished(false)
+            return
+        }
         val src = sourceName()
         dbg("لقيت صورة في الحافظة، بحفظها")
         Thread {
@@ -250,13 +290,20 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 if (path == null) {
                     dbg("مقدرتش أقرا الصورة: ${ImageStore.lastError ?: "-"}")
                     onFinished(true)
-                } else if (h != null && h == lastImageHash && now - lastImageAt < SAME_IMAGE_WINDOW) {
+                } else if (passive && h != null && h == HistoryRepository.dismissedImageHash) {
+                    ImageStore.delete(path)
+                    dbg("الصورة دي اتمسحت قبل كده، اتجاهلتها")
+                    onFinished(false)
+                } else if (h != null && h == lastImageHash && now - lastImageAt < SAME_IMAGE_WINDOW &&
+                    h != HistoryRepository.dismissedImageHash
+                ) {
                     ImageStore.delete(path)
                     dbg("نفس الصورة السابقة")
                     onFinished(true)
                 } else {
                     lastImageHash = h
                     lastImageAt = now
+                    HistoryRepository.dismissedImageHash = null
                     HistoryRepository.addImage(path, src)
                     shelf?.popOpen()
                     dbg("اتسجلت صورة من $src")
@@ -273,17 +320,23 @@ class ClipboardAccessibilityService : AccessibilityService() {
      */
     private fun requestCapture(
         manual: Boolean,
+        passive: Boolean,
         expectChange: Boolean,
         acceptUnchanged: Boolean,
         maxAttempts: Int
     ) {
         if (captureBusy) return
+        // بلاش نسرق التركيز (ورمشة الشاشة) لو الالتقاط أصلاً ممنوع
+        if (!manual && !PrivacyPolicy.allowsCapture(sourcePackage())) {
+            dbg("الالتقاط متوقف (وضع خاص أو تطبيق مستثنى)")
+            return
+        }
         val s = shelf ?: return
         captureBusy = true
         val token = ++captureToken
         // أمان: لو حصل أي حاجة غريبة نفك القفل بعد 8 ثواني
         handler.postDelayed({ if (captureToken == token) captureBusy = false }, 8000)
-        captureLoop(s, 0, lastCaptured, manual, expectChange, acceptUnchanged, maxAttempts)
+        captureLoop(s, 0, lastCaptured, manual, passive, expectChange, acceptUnchanged, maxAttempts)
     }
 
     private fun captureLoop(
@@ -291,17 +344,21 @@ class ClipboardAccessibilityService : AccessibilityService() {
         attempt: Int,
         baseline: String?,
         manual: Boolean,
+        passive: Boolean,
         expectChange: Boolean,
         acceptUnchanged: Boolean,
         maxAttempts: Int
     ) {
         s.captureClipboard { text, uri, skipped ->
             if (uri != null) {
-                acceptImage(uri) { sameOrFail ->
+                acceptImage(uri, passive, manual) { sameOrFail ->
                     if (sameOrFail && expectChange && attempt < maxAttempts) {
                         handler.postDelayed(
                             {
-                                captureLoop(s, attempt + 1, baseline, manual, expectChange, acceptUnchanged, maxAttempts)
+                                captureLoop(
+                                    s, attempt + 1, baseline, manual, passive,
+                                    expectChange, acceptUnchanged, maxAttempts
+                                )
                             },
                             350
                         )
@@ -322,7 +379,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
             if ((empty || unchanged) && attempt < maxAttempts) {
                 handler.postDelayed(
                     {
-                        captureLoop(s, attempt + 1, baseline, manual, expectChange, acceptUnchanged, maxAttempts)
+                        captureLoop(
+                            s, attempt + 1, baseline, manual, passive,
+                            expectChange, acceptUnchanged, maxAttempts
+                        )
                     },
                     350
                 )
@@ -336,7 +396,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 } else if (unchanged && !acceptUnchanged) {
                     dbg("مفيش نسخ جديد")
                 } else {
-                    acceptText(t)
+                    acceptText(t, passive, manual)
                 }
             }
         }
@@ -357,10 +417,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 val sp = selectionPkg
                 if (sp != null && pkg != sp && SystemClock.uptimeMillis() - selectionAt < 60_000) {
                     selectionPkg = null
-                    markTrigger(labelFor(sp))
+                    markTrigger(sp)
                     dbg("خرجت من ${labelFor(sp)} بعد تحديد نص، بفحص الحافظة")
                     handler.postDelayed({
-                        requestCapture(manual = false, expectChange = true, acceptUnchanged = false, maxAttempts = 1)
+                        requestCapture(
+                            manual = false, passive = true,
+                            expectChange = true, acceptUnchanged = false, maxAttempts = 1
+                        )
                     }, 500)
                 }
             }
@@ -368,11 +431,14 @@ class ClipboardAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 if (isSystemNoise(pkg)) return
                 if (looksLikeCopy(event)) {
-                    markTrigger(labelFor(pkg))
+                    markTrigger(pkg)
                     dbg("ضغطة نسخ في ${labelFor(pkg)}")
                     // التطبيق محتاج لحظة يحط النص في الحافظة قبل ما نقراه
                     handler.postDelayed({
-                        requestCapture(manual = false, expectChange = true, acceptUnchanged = true, maxAttempts = 3)
+                        requestCapture(
+                            manual = false, passive = false,
+                            expectChange = true, acceptUnchanged = true, maxAttempts = 3
+                        )
                     }, 150)
                 }
             }
