@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * مصدر واحد للحقيقة: الرف وشاشة السجل بيقروا ويكتبوا من هنا بس.
@@ -26,6 +27,7 @@ object HistoryRepository {
     private val _items = MutableStateFlow<List<ShelfItem>>(emptyList())
     private val _loaded = MutableStateFlow(false)
     private var started = false
+    private var lastTs = 0L
 
     val items: StateFlow<List<ShelfItem>> = _items.asStateFlow()
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
@@ -34,10 +36,7 @@ object HistoryRepository {
     @Volatile
     var ignoreClipUntil: Long = 0L
 
-    /**
-     * النص التالف (صورة اتقرت كنص) أو الضخم جداً بيعلّق الشاشة،
-     * فبنرفضه وبننضّف أي حاجة منه كانت اتحفظت قبل كده.
-     */
+    // النص التالف (صورة اتقرت كنص) أو الضخم جداً بيعلّق الشاشة، فبنرفضه
     fun isGarbage(text: String): Boolean {
         if (text.length > MAX_TEXT_LENGTH) return true
         val n = minOf(text.length, 2000)
@@ -51,16 +50,25 @@ object HistoryRepository {
     }
 
     @Synchronized
+    private fun nextTs(): Long {
+        val t = System.currentTimeMillis()
+        lastTs = if (t > lastTs) t else lastTs + 1
+        return lastTs
+    }
+
+    @Synchronized
     fun init(context: Context) {
         if (started) return
         started = true
         val manager = HistoryManager(context.applicationContext)
         scope.launch {
-            val saved = manager.loadHistory().filterNot { isGarbage(it.text) }
+            val saved = manager.loadHistory()
+                .filterNot { isGarbage(it.text) }
+                .filter { it.imagePath == null || File(it.imagePath).exists() }
             // أي حاجة اتضافت قبل ما التحميل يخلص بتتقدم، والمحفوظ القديم بيتحط بعدها
             _items.update { current ->
-                val known = current.map { it.text }.toSet()
-                current + saved.filter { it.text !in known }
+                val known = current.map { it.text + "|" + it.timestamp }.toSet()
+                current + saved.filter { (it.text + "|" + it.timestamp) !in known }
             }
             _loaded.value = true
             _items.collectLatest { list ->
@@ -83,6 +91,11 @@ object HistoryRepository {
         }
     }
 
+    fun addImage(path: String, source: String) {
+        val item = ShelfItem(text = "", source = source, timestamp = nextTs(), imagePath = path)
+        _items.update { list -> listOf(item) + list }
+    }
+
     fun togglePin(item: ShelfItem) {
         _items.update { list ->
             list.map { if (same(it, item)) it.copy(isPinned = !it.isPinned) else it }
@@ -91,9 +104,18 @@ object HistoryRepository {
 
     fun remove(item: ShelfItem) {
         _items.update { list -> list.filterNot { same(it, item) } }
+        val p = item.imagePath
+        if (p != null) scope.launch { ImageStore.delete(p) }
     }
 
     fun clearUnpinned() {
+        val gone = _items.value.filter { !it.isPinned }
         _items.update { list -> list.filter { it.isPinned } }
+        scope.launch {
+            for (g in gone) {
+                val p = g.imagePath
+                if (p != null) ImageStore.delete(p)
+            }
+        }
     }
 }
