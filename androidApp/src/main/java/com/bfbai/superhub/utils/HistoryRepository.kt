@@ -36,6 +36,14 @@ object HistoryRepository {
     @Volatile
     var ignoreClipUntil: Long = 0L
 
+    // آخر نص/صورة المستخدم مسحهم: الالتقاط السلبي (زي لمسة المقبض) بيتجاهلهم
+    // لحد ما تنسخ حاجة جديدة أو تنسخ نفس العنصر بنفسك
+    @Volatile
+    var dismissedText: String? = null
+
+    @Volatile
+    var dismissedImageHash: String? = null
+
     // النص التالف (صورة اتقرت كنص) أو الضخم جداً بيعلّق الشاشة، فبنرفضه
     fun isGarbage(text: String): Boolean {
         if (text.length > MAX_TEXT_LENGTH) return true
@@ -60,11 +68,27 @@ object HistoryRepository {
     fun init(context: Context) {
         if (started) return
         started = true
+        PrivacyPolicy.init(context)
         val manager = HistoryManager(context.applicationContext)
+        val days = PrivacyPolicy.autoWipeDays()
+        val cutoff = if (days > 0) System.currentTimeMillis() - days * 86_400_000L else 0L
         scope.launch {
-            val saved = manager.loadHistory()
+            val all = manager.loadHistory()
                 .filterNot { isGarbage(it.text) }
                 .filter { it.imagePath == null || File(it.imagePath).exists() }
+
+            // المسح التلقائي للأقدم (لو مفعّل في الخصوصية): المثبّت بيفضل
+            val saved = if (cutoff > 0L) {
+                val old = all.filter { !it.isPinned && it.timestamp < cutoff }
+                for (o in old) {
+                    val p = o.imagePath
+                    if (p != null) ImageStore.delete(p)
+                }
+                all.filter { it.isPinned || it.timestamp >= cutoff }
+            } else {
+                all
+            }
+
             // أي حاجة اتضافت قبل ما التحميل يخلص بتتقدم، والمحفوظ القديم بيتحط بعدها
             _items.update { current ->
                 val known = current.map { it.text + "|" + it.timestamp }.toSet()
@@ -124,6 +148,7 @@ object HistoryRepository {
     }
 
     fun remove(item: ShelfItem) {
+        if (item.imagePath == null) dismissedText = item.text else dismissedImageHash = item.imageHash
         _items.update { list -> list.filterNot { same(it, item) } }
         val p = item.imagePath
         if (p != null) scope.launch { ImageStore.delete(p) }
@@ -131,7 +156,26 @@ object HistoryRepository {
 
     fun clearUnpinned() {
         val gone = _items.value.filter { !it.isPinned }
+        val firstText = gone.firstOrNull { it.imagePath == null }
+        val firstImage = gone.firstOrNull { it.imagePath != null }
+        if (firstText != null) dismissedText = firstText.text
+        if (firstImage != null) dismissedImageHash = firstImage.imageHash
         _items.update { list -> list.filter { it.isPinned } }
+        scope.launch {
+            for (g in gone) {
+                val p = g.imagePath
+                if (p != null) ImageStore.delete(p)
+            }
+        }
+    }
+
+    // مسح الأقدم من عدد أيام معيّن (المثبّت بيفضل)
+    fun cleanOlderThan(days: Int) {
+        if (days <= 0) return
+        val cutoff = System.currentTimeMillis() - days * 86_400_000L
+        val gone = _items.value.filter { !it.isPinned && it.timestamp < cutoff }
+        if (gone.isEmpty()) return
+        _items.update { list -> list.filter { it.isPinned || it.timestamp >= cutoff } }
         scope.launch {
             for (g in gone) {
                 val p = g.imagePath
