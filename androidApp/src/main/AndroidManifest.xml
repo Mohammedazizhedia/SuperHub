@@ -21,23 +21,40 @@
         android:label="HubSync"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-   
+
+        <!-- Built with BFB.AI: مزود الملفات (مشاركة ونسخ الصور) -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Built with BFB.AI: شاشة السجل -->
         <activity
             android:name=".ui.HistoryActivity"
             android:exported="false"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
-        <!-- Built with BFB.AI: نشاط استقبال المشاركات -->
+        <!-- Built with BFB.AI: نشاط استقبال المشاركات (نصوص وصور) -->
         <activity
             android:name=".ui.ShareReceiverActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="true"
+            android:excludeFromRecents="true"
             android:label="حفظ في HubSync">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
