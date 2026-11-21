@@ -91,9 +91,30 @@ object HistoryRepository {
         }
     }
 
+    // لو نفس الصورة (بنفس المحتوى) موجودة، بنطلّعها لفوق ونمسح النسخة الجديدة بدل ما نكررها
     fun addImage(path: String, source: String) {
-        val item = ShelfItem(text = "", source = source, timestamp = nextTs(), imagePath = path)
-        _items.update { list -> listOf(item) + list }
+        scope.launch {
+            val h = ImageStore.hashOf(path)
+            val existing = if (h != null) {
+                _items.value.firstOrNull { it.imagePath != null && it.imageHash == h }
+            } else {
+                null
+            }
+            if (existing != null) {
+                if (existing.imagePath != path) ImageStore.delete(path)
+                val bumped = existing.copy(timestamp = nextTs())
+                _items.update { list -> listOf(bumped) + list.filterNot { same(it, existing) } }
+            } else {
+                val item = ShelfItem(
+                    text = "",
+                    source = source,
+                    timestamp = nextTs(),
+                    imagePath = path,
+                    imageHash = h
+                )
+                _items.update { list -> listOf(item) + list }
+            }
+        }
     }
 
     fun togglePin(item: ShelfItem) {
