@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- قراءة الصور المسحوبة من المعرض -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -32,6 +38,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Built with BFB.AI: طلب صلاحية الصور (شفافة وبتقفل لوحدها) -->
+        <activity
+            android:name=".ui.MediaPermissionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Built with BFB.AI: شاشة السجل -->
         <activity
