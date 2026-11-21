@@ -18,13 +18,17 @@ import java.util.concurrent.Executors
 /** حفظ الصور جوه التطبيق + نسخها ومشاركتها */
 object ImageStore {
 
+    // سبب آخر فشل (للتشخيص)
+    @Volatile
+    var lastError: String? = null
+
     private fun dir(ctx: Context): File {
         val d = File(ctx.applicationContext.filesDir, "hubsync_images")
         d.mkdirs()
         return d
     }
 
-    // بينسخ الصورة من Uri لملف جوه التطبيق. بيرجع المسار أو null لو فشل (مثلاً مفيش صلاحية قراءة)
+    // بينسخ الصورة من Uri لملف جوه التطبيق. بيرجع المسار أو null لو فشل
     fun saveFromUri(ctx: Context, uri: Uri): String? {
         val app = ctx.applicationContext
         var out: File? = null
@@ -41,19 +45,35 @@ object ImageStore {
                 "img_" + System.currentTimeMillis() + "_" + (Math.random() * 10000).toInt() + "." + ext
             )
             out = f
-            val input = app.contentResolver.openInputStream(uri) ?: return null
-            input.use { ins -> f.outputStream().use { os -> ins.copyTo(os) } }
-
-            // نتأكد إنه فعلاً صورة، مش بيانات تالفة
-            val bounds = BitmapFactory.Options()
-            bounds.inJustDecodeBounds = true
-            BitmapFactory.decodeFile(f.absolutePath, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-                f.delete()
+            val input = app.contentResolver.openInputStream(uri)
+            if (input == null) {
+                lastError = "التطبيق المصدر رفض فتح الصورة"
                 return null
             }
+            input.use { ins -> f.outputStream().use { os -> ins.copyTo(os) } }
+
+            if (!f.exists() || f.length() <= 0L) {
+                f.delete()
+                lastError = "الملف طلع فاضي"
+                return null
+            }
+
+            // لو النوع معروف إنه صورة نقبله كما هو، وإلا نتأكد إنه فعلاً صورة
+            val knownImage = mime != null && mime.startsWith("image/")
+            if (!knownImage) {
+                val bounds = BitmapFactory.Options()
+                bounds.inJustDecodeBounds = true
+                BitmapFactory.decodeFile(f.absolutePath, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                    f.delete()
+                    lastError = "الملف مش صورة (النوع: ${mime ?: "غير معروف"})"
+                    return null
+                }
+            }
+            lastError = null
             return f.absolutePath
         } catch (e: Exception) {
+            lastError = e.javaClass.simpleName + ": " + (e.message ?: "")
             try {
                 out?.delete()
             } catch (ignored: Exception) {
@@ -79,6 +99,7 @@ object ImageStore {
             cm.setPrimaryClip(ClipData.newUri(ctx.contentResolver, "hubsync-image", uriFor(ctx, path)))
             true
         } catch (e: Exception) {
+            lastError = e.javaClass.simpleName + ": " + (e.message ?: "")
             false
         }
     }
