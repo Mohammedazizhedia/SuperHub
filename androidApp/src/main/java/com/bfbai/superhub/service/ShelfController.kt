@@ -41,6 +41,7 @@ import com.bfbai.superhub.utils.Detection
 import com.bfbai.superhub.utils.HistoryRepository
 import com.bfbai.superhub.utils.ImageStore
 import com.bfbai.superhub.utils.ItemKind
+import com.bfbai.superhub.utils.PrivacyPolicy
 import com.bfbai.superhub.utils.SmartDetector
 import com.bfbai.superhub.utils.Thumbs
 import kotlinx.coroutines.CoroutineScope
@@ -65,6 +66,8 @@ data class ShelfItem(
 )
 
 internal fun withAlpha(color: Int, alpha: Int): Int = (alpha shl 24) or (color and 0x00FFFFFF)
+
+private val PRIVATE_COLOR: Int = Color.parseColor("#FF9800")
 
 /** كل شكل الرف وسلوكه في مكان واحد، وهنوصله بالإعدادات في خطوة قادمة */
 object ShelfStyle {
@@ -345,9 +348,11 @@ class ShelfController(
     private val scroll: ScrollView = ScrollView(ctx)
     private val root: FrameLayout = FrameLayout(ctx)
     private val topBar: LinearLayout = LinearLayout(ctx)
+    private val titleTv: TextView = TextView(ctx)
     private val countTv: TextView = TextView(ctx)
     private val grip: View = View(ctx)
     private var customMenu: LinearLayout? = null
+    private var privateOptionTv: TextView? = null
 
     private val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
 
@@ -411,15 +416,13 @@ class ShelfController(
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val title = TextView(ctx).apply {
-            text = "HubSync"
-            setTextColor(ShelfStyle.textColor)
-            textSize = 16f
-            setTypeface(null, Typeface.BOLD)
-        }
+        titleTv.text = "HubSync"
+        titleTv.setTextColor(ShelfStyle.textColor)
+        titleTv.textSize = 16f
+        titleTv.setTypeface(null, Typeface.BOLD)
         countTv.setTextColor(ShelfStyle.subTextColor)
         countTv.textSize = 11f
-        titleBox.addView(title)
+        titleBox.addView(titleTv)
         titleBox.addView(countTv)
 
         val menuBtn = TextView(ctx).apply {
@@ -457,6 +460,7 @@ class ShelfController(
             ).apply { topMargin = (54 * dp).toInt() }
         )
         topBar.visibility = View.GONE
+        updateTitle()
 
         // أي تغيير في المخزن (من الرف أو من شاشة السجل) بيتعرض هنا فوراً
         HistoryRepository.items
@@ -606,6 +610,31 @@ class ShelfController(
     private fun resetAutoClose() {
         autoCloseHandler.removeCallbacks(autoCloseRunnable)
         if (expanded) autoCloseHandler.postDelayed(autoCloseRunnable, ShelfStyle.autoCloseMs)
+    }
+
+    // ---------- الوضع الخاص: مؤشر في الترويسة وفي لون المقبض ----------
+
+    private fun updateTitle() {
+        val priv = PrivacyPolicy.isPrivateMode()
+        titleTv.text = if (priv) "HubSync • وضع خاص" else "HubSync"
+        titleTv.setTextColor(if (priv) PRIVATE_COLOR else ShelfStyle.textColor)
+        (grip.background as? GradientDrawable)?.setColor(
+            withAlpha(if (priv) PRIVATE_COLOR else ShelfStyle.accent, 0xCC)
+        )
+    }
+
+    private fun privateLabel(): String =
+        if (PrivacyPolicy.isPrivateMode()) "إيقاف الوضع الخاص" else "وضع خاص (30 دقيقة)"
+
+    private fun togglePrivate() {
+        if (PrivacyPolicy.isPrivateMode()) {
+            PrivacyPolicy.stopPrivate()
+            Toast.makeText(ctx, "الوضع الخاص اتقفل، الالتقاط رجع", Toast.LENGTH_SHORT).show()
+        } else {
+            PrivacyPolicy.startPrivate(30)
+            Toast.makeText(ctx, "الوضع الخاص شغال 30 دقيقة: مش هلتقط أي نسخ", Toast.LENGTH_LONG).show()
+        }
+        updateTitle()
     }
 
     // ---------- Throw to close ----------
@@ -767,13 +796,16 @@ class ShelfController(
 
             DragEvent.ACTION_DROP -> {
                 dropped = true
-                dbgToast("إفلات")
                 val cd = e.clipData
                 if (cd != null) {
+                    val mime = if (cd.description.mimeTypeCount > 0) cd.description.getMimeType(0) else "?"
+                    dbgToast("إفلات: $mime")
                     val open = !dragFromHidden
                     for (i in 0 until cd.itemCount) {
                         handleDropped(cd.getItemAt(i), cd.description, open)
                     }
+                } else {
+                    dbgToast("إفلات من غير بيانات")
                 }
             }
 
@@ -794,6 +826,17 @@ class ShelfController(
     private fun handleDropped(item: ClipData.Item, desc: ClipDescription?, open: Boolean) {
         val uri = item.uri
         val imageMime = desc?.hasMimeType("image/*") == true
+
+        // سحب صورة من غير رابط: مفيش حاجة نقراها
+        if (imageMime && uri == null) {
+            Toast.makeText(
+                ctx,
+                "الصورة اتسحبت من غير رابط يتقري. استخدم المشاركة (Share)",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
         var isImage = false
         if (uri != null) {
             isImage = imageMime || try {
@@ -805,6 +848,7 @@ class ShelfController(
 
         if (isImage && uri != null) {
             val src = appNameProvider?.invoke() ?: "سحب"
+            dbgToast("صورة من ${uri.authority ?: "?"}")
             Thread {
                 val path = ImageStore.saveFromUri(ctx, uri)
                 autoCloseHandler.post {
@@ -900,6 +944,7 @@ class ShelfController(
             } catch (e: Exception) {
             }
         }
+        updateTitle()
         onShownChanged?.invoke(true)
     }
 
@@ -977,6 +1022,7 @@ class ShelfController(
             root.visibility = View.VISIBLE
             root.alpha = if (userHidden) 0f else 1f
         }
+        updateTitle()
         updateBackground()
         applyBlur()
         if (added) wm.updateViewLayout(root, lp)
@@ -1018,7 +1064,7 @@ class ShelfController(
                 setStroke((1 * dp).toInt(), ShelfStyle.panelStroke)
             }
             val lpMenu = FrameLayout.LayoutParams(
-                (170 * dp).toInt(),
+                (190 * dp).toInt(),
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP or Gravity.END
             )
@@ -1026,35 +1072,40 @@ class ShelfController(
             lpMenu.marginEnd = (10 * dp).toInt()
             menu.layoutParams = lpMenu
 
-            val options = listOf("السجل", "الإعدادات", "إغلاق")
-            for ((index, opt) in options.withIndex()) {
-                val tv = TextView(ctx).apply {
-                    text = opt
-                    setTextColor(ShelfStyle.textColor)
-                    textSize = 15f
-                    setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
-                    setOnClickListener {
-                        hideCustomMenu()
-                        when (opt) {
-                            "السجل" -> {
-                                setExpanded(false)
-                                val intent = Intent(ctx, HistoryActivity::class.java)
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                try {
-                                    ctx.startActivity(intent)
-                                } catch (e: Exception) {
-                                    Toast.makeText(ctx, "افتح التطبيق من الأيقونة", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                            "الإعدادات" -> {
-                                Toast.makeText(ctx, "الإعدادات قريباً", Toast.LENGTH_SHORT).show()
-                            }
-                            "إغلاق" -> {
-                                setExpanded(false)
+            val options = listOf(
+                "history" to "السجل",
+                "private" to "",
+                "settings" to "الإعدادات",
+                "close" to "إغلاق"
+            )
+            for ((index, entry) in options.withIndex()) {
+                val key = entry.first
+                val tv = TextView(ctx)
+                tv.text = if (key == "private") privateLabel() else entry.second
+                tv.setTextColor(if (key == "private") PRIVATE_COLOR else ShelfStyle.textColor)
+                tv.textSize = 15f
+                tv.setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (12 * dp).toInt())
+                tv.setOnClickListener {
+                    hideCustomMenu()
+                    when (key) {
+                        "history" -> {
+                            setExpanded(false)
+                            val intent = Intent(ctx, HistoryActivity::class.java)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            try {
+                                ctx.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(ctx, "افتح التطبيق من الأيقونة", Toast.LENGTH_SHORT).show()
                             }
                         }
+                        "private" -> togglePrivate()
+                        "settings" -> {
+                            Toast.makeText(ctx, "الإعدادات قريباً", Toast.LENGTH_SHORT).show()
+                        }
+                        "close" -> setExpanded(false)
                     }
                 }
+                if (key == "private") privateOptionTv = tv
                 menu.addView(tv)
 
                 if (index < options.size - 1) {
@@ -1070,6 +1121,7 @@ class ShelfController(
             customMenu = menu
             root.addView(menu)
         }
+        privateOptionTv?.text = privateLabel()
         customMenu?.visibility = View.VISIBLE
     }
 
