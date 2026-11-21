@@ -55,6 +55,9 @@ internal fun withAlpha(color: Int, alpha: Int): Int = (alpha shl 24) or (color a
 
 /** كل شكل الرف في مكان واحد، وهنوصله بالإعدادات في خطوة قادمة */
 object ShelfStyle {
+    // اللوحة: لون واحد شفاف (من غير تدرج). التدرج خيار.
+    var panelColor: Int = Color.parseColor("#CC0F2147")
+    var panelGradient: Boolean = false
     var panelTop: Int = Color.parseColor("#D91A3563")
     var panelBottom: Int = Color.parseColor("#E60A1730")
     var panelStroke: Int = Color.parseColor("#40FFFFFF")
@@ -65,9 +68,18 @@ object ShelfStyle {
 
     var cornerDp: Float = 18f
     var cardCornerDp: Float = 14f
-    var cardTintStartAlpha: Int = 0x59
-    var cardTintEndAlpha: Int = 0x14
-    var cardStrokeAlpha: Int = 0x66
+
+    // الكروت: فاتحة شفافة بلون واحد من غير تدرج
+    var cardFillColor: Int = Color.WHITE
+    var cardFillAlpha: Int = 0x2E
+    var cardStrokeColor: Int = Color.WHITE
+    var cardStrokeAlpha: Int = 0x40
+    // خيارات للإعدادات: لون الكارت من نوعه، والتدرج
+    var cardTintByKind: Boolean = false
+    var cardGradient: Boolean = false
+    var cardGradientEndAlpha: Int = 0x10
+    var rotateTextColors: Boolean = false
+    var neutralColor: Int = Color.parseColor("#B7C7E4")
 
     var blurEnabled: Boolean = true
     var blurRadiusDp: Float = 28f
@@ -79,6 +91,9 @@ object ShelfStyle {
 
     var autoCloseMs: Long = 10_000L
     var otpTtlMs: Long = 60_000L
+
+    // أقصى طول نص بيتعرض في الكارت (النص الكامل بيتحفظ كامل)
+    var previewChars: Int = 400
 
     val kindColors: Map<ItemKind, Int> = mapOf(
         ItemKind.OTP to Color.parseColor("#FFB020"),
@@ -247,7 +262,7 @@ class ShelfController(
         HistoryRepository.items
             .onEach { all ->
                 items.clear()
-                items.addAll(all.sortedByDescending { it.isPinned }.take(100))
+                items.addAll(all.sortedByDescending { it.isPinned }.take(50))
                 render()
             }
             .launchIn(scope)
@@ -412,10 +427,12 @@ class ShelfController(
                 }
                 onResult(text, sensitive)
             }
-        }, if (n == 0) 250L else 300L)
+        }, if (n == 0) 140L else 220L)
     }
 
+    // النصوص الطويلة ما بنحللهاش (بتبطّئ، ومحدش بيعمل OTP أو رابط من 1000 حرف)
     private fun detectOf(text: String): Detection {
+        if (text.length > 1000) return Detection(ItemKind.TEXT, text)
         val cached = detectCache[text]
         if (cached != null) return cached
         if (detectCache.size > 500) detectCache.clear()
@@ -481,13 +498,17 @@ class ShelfController(
         anim.start()
     }
 
-    // زجاجي: تدرج شفاف + حد خفيف. والمطوي أغمق شوية مع حد سماوي
+    // زجاجي: لون واحد شفاف (التدرج خيار) + حد خفيف. والمطوي لون المقبض
     private fun updateBackground() {
         val r = ShelfStyle.cornerDp * dp
-        val top = if (expanded) ShelfStyle.panelTop else ShelfStyle.handleColor
-        val bottom = if (expanded) ShelfStyle.panelBottom else ShelfStyle.handleColor
-        val bg = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(top, bottom))
+        val bg = GradientDrawable()
         bg.shape = GradientDrawable.RECTANGLE
+        if (expanded && ShelfStyle.panelGradient) {
+            bg.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM)
+            bg.setColors(intArrayOf(ShelfStyle.panelTop, ShelfStyle.panelBottom))
+        } else {
+            bg.setColor(if (expanded) ShelfStyle.panelColor else ShelfStyle.handleColor)
+        }
         bg.cornerRadii = if (isRightSide) {
             floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r)
         } else {
@@ -725,6 +746,16 @@ class ShelfController(
         ItemKind.TEXT -> "نص"
     }
 
+    // حذف فوري: بنشيل الكارت من الشاشة الأول وبعدين من المخزن
+    private fun deleteItem(item: ShelfItem, card: View) {
+        if (item.isPinned) {
+            Toast.makeText(ctx, "ألغِ التثبيت الأول", Toast.LENGTH_SHORT).show()
+            return
+        }
+        list.removeView(card)
+        HistoryRepository.remove(item)
+    }
+
     private fun pill(label: String, color: Int, primary: Boolean, onClick: () -> Unit): TextView {
         val tv = TextView(ctx)
         tv.text = label
@@ -758,23 +789,36 @@ class ShelfController(
     private fun buildItem(item: ShelfItem, index: Int): LinearLayout {
         val det = detectOf(item.text)
         val color = ShelfStyle.kindColors[det.kind]
-            ?: ShelfStyle.textPalette[index % ShelfStyle.textPalette.size]
+            ?: if (ShelfStyle.rotateTextColors) {
+                ShelfStyle.textPalette[index % ShelfStyle.textPalette.size]
+            } else {
+                ShelfStyle.neutralColor
+            }
         val pad = (12 * dp).toInt()
 
         val card = LinearLayout(ctx)
         card.orientation = LinearLayout.VERTICAL
         card.setPadding(pad, pad, pad, pad)
 
-        // كارت زجاجي ملون: تدرج شفاف من لون النوع + حد خفيف بنفس اللون
-        val bg = GradientDrawable(
-            if (isRightSide) GradientDrawable.Orientation.RIGHT_LEFT else GradientDrawable.Orientation.LEFT_RIGHT,
-            intArrayOf(
-                withAlpha(color, ShelfStyle.cardTintStartAlpha),
-                withAlpha(color, ShelfStyle.cardTintEndAlpha)
-            )
-        )
+        // كارت فاتح شفاف بلون واحد (التدرج ولون النوع خيارات)
+        val fill = if (ShelfStyle.cardTintByKind) {
+            withAlpha(color, ShelfStyle.cardFillAlpha)
+        } else {
+            withAlpha(ShelfStyle.cardFillColor, ShelfStyle.cardFillAlpha)
+        }
+        val bg = GradientDrawable()
+        bg.shape = GradientDrawable.RECTANGLE
         bg.cornerRadius = ShelfStyle.cardCornerDp * dp
-        bg.setStroke((1 * dp).toInt(), withAlpha(color, ShelfStyle.cardStrokeAlpha))
+        if (ShelfStyle.cardGradient) {
+            bg.setOrientation(
+                if (isRightSide) GradientDrawable.Orientation.RIGHT_LEFT
+                else GradientDrawable.Orientation.LEFT_RIGHT
+            )
+            bg.setColors(intArrayOf(fill, withAlpha(fill, ShelfStyle.cardGradientEndAlpha)))
+        } else {
+            bg.setColor(fill)
+        }
+        bg.setStroke((1 * dp).toInt(), withAlpha(ShelfStyle.cardStrokeColor, ShelfStyle.cardStrokeAlpha))
         card.background = bg
 
         val cardParams = LinearLayout.LayoutParams(
@@ -784,7 +828,7 @@ class ShelfController(
         cardParams.setMargins(0, 0, 0, (10 * dp).toInt())
         card.layoutParams = cardParams
 
-        // الصف الأول: شارة النوع + (عد تنازلي للـ OTP) + النجمة
+        // الصف الأول: شارة النوع + (عد تنازلي للـ OTP) + النجمة + حذف
         val top = LinearLayout(ctx)
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL
@@ -823,9 +867,17 @@ class ShelfController(
         pinBtn.setPadding((10 * dp).toInt(), 0, 0, 0)
         pinBtn.setOnClickListener { HistoryRepository.togglePin(item) }
         top.addView(pinBtn)
+
+        val delBtn = TextView(ctx)
+        delBtn.text = "✕"
+        delBtn.textSize = 14f
+        delBtn.setTextColor(ShelfStyle.subTextColor)
+        delBtn.setPadding((12 * dp).toInt(), 0, 0, 0)
+        delBtn.setOnClickListener { deleteItem(item, card) }
+        top.addView(delBtn)
         card.addView(top)
 
-        // المحتوى
+        // المحتوى (بنعرض أول جزء بس من النص الطويل)
         val content = TextView(ctx)
         if (det.kind == ItemKind.OTP) {
             content.text = det.value
@@ -835,7 +887,12 @@ class ShelfController(
             content.letterSpacing = 0.15f
             content.textDirection = View.TEXT_DIRECTION_LTR
         } else {
-            content.text = item.text
+            val shown = if (item.text.length > ShelfStyle.previewChars) {
+                item.text.substring(0, ShelfStyle.previewChars) + "…"
+            } else {
+                item.text
+            }
+            content.text = shown
             content.setTextColor(ShelfStyle.textColor)
             content.textSize = 14f
             content.maxLines = 3
@@ -892,11 +949,14 @@ class ShelfController(
 
         // السحب للجانب بيحذف (إلا المثبّت)
         val gestureDetector = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
             override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
                 if (e1 == null) return false
                 val diffX = e2.x - e1.x
-                if (abs(diffX) > 100 && abs(velocityX) > 100) {
-                    if (!item.isPinned) HistoryRepository.remove(item)
+                val diffY = e2.y - e1.y
+                if (abs(diffX) > 80 && abs(velocityX) > 80 && abs(diffX) > abs(diffY)) {
+                    deleteItem(item, card)
                     return true
                 }
                 return false
