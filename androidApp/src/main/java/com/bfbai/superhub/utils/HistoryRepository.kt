@@ -20,6 +20,8 @@ import kotlinx.coroutines.launch
  */
 object HistoryRepository {
 
+    private const val MAX_TEXT_LENGTH = 100_000
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _items = MutableStateFlow<List<ShelfItem>>(emptyList())
     private val _loaded = MutableStateFlow(false)
@@ -28,9 +30,25 @@ object HistoryRepository {
     val items: StateFlow<List<ShelfItem>> = _items.asStateFlow()
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
 
-    // لو الخدمة بتنادي عليها قبل ما تعمل setPrimaryClip من الشاشة، ممكن تستخدمها لتجاهل صدى النسخ
+    // لتجاهل صدى النسخ اللي بنعمله إحنا (مثلاً نسخ من السجل)
     @Volatile
     var ignoreClipUntil: Long = 0L
+
+    /**
+     * النص التالف (صورة اتقرت كنص) أو الضخم جداً بيعلّق الشاشة،
+     * فبنرفضه وبننضّف أي حاجة منه كانت اتحفظت قبل كده.
+     */
+    fun isGarbage(text: String): Boolean {
+        if (text.length > MAX_TEXT_LENGTH) return true
+        val n = minOf(text.length, 2000)
+        if (n == 0) return false
+        var bad = 0
+        for (i in 0 until n) {
+            val c = text[i]
+            if (c == '\uFFFD' || (c < ' ' && c != '\n' && c != '\r' && c != '\t')) bad++
+        }
+        return bad * 100 > n * 2
+    }
 
     @Synchronized
     fun init(context: Context) {
@@ -38,7 +56,7 @@ object HistoryRepository {
         started = true
         val manager = HistoryManager(context.applicationContext)
         scope.launch {
-            val saved = manager.loadHistory()
+            val saved = manager.loadHistory().filterNot { isGarbage(it.text) }
             // أي حاجة اتضافت قبل ما التحميل يخلص بتتقدم، والمحفوظ القديم بيتحط بعدها
             _items.update { current ->
                 val known = current.map { it.text }.toSet()
@@ -57,7 +75,7 @@ object HistoryRepository {
 
     fun add(text: String, source: String) {
         val t = text.trim()
-        if (t.isEmpty()) return
+        if (t.isEmpty() || isGarbage(t)) return
         _items.update { list ->
             val old = list.firstOrNull { it.text == t }
             listOf(ShelfItem(text = t, source = source, isPinned = old?.isPinned ?: false)) +
