@@ -6,6 +6,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -27,8 +29,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
         // رسائل التشخيص المؤقتة: خليها false بعد ما نتأكد إن النسخ شغال
         private const val DEBUG = true
-
-        private const val MAX_ATTEMPTS = 3
     }
 
     private lateinit var clipboardManager: ClipboardManager
@@ -36,7 +36,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var shelf: ShelfController? = null
     private var clipListener: ClipboardManager.OnPrimaryClipChangedListener? = null
 
-    private var lastApp: String? = null
+    private var lastRealApp: String? = null
     private var lastCopyApp: String? = null
     private var lastCopyAt: Long = 0L
     private var ignoreClipUntil: Long = 0L
@@ -44,7 +44,20 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var captureBusy: Boolean = false
     private var lastCaptured: String? = null
 
+    // آخر تطبيق حصل فيه تحديد نص (لو خرجت منه بعدها، بنفحص الحافظة)
+    private var selectionPkg: String? = null
+    private var selectionAt: Long = 0L
+
     private val copyWords = listOf("copy", "نسخ")
+
+    private val homePackage: String? by lazy {
+        try {
+            val i = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            packageManager.resolveActivity(i, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        } catch (e: Exception) {
+            null
+        }
+    }
 
     val shelfShown: Boolean get() = shelf?.isShown == true
 
@@ -53,26 +66,73 @@ class ClipboardAccessibilityService : AccessibilityService() {
         return shelfShown
     }
 
+    // بتتنادى من شاشة المشاركة بعد ما تحفظ حاجة
+    fun popShelf() {
+        shelf?.popOpen()
+    }
+
     // التقاط يدوي للحافظة (ممكن يتنادى من أي زرار أو إشعار)
     fun pasteFromShelf() {
-        requestCapture(manual = true, expectChange = false)
+        requestCapture(manual = true, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
     }
 
     private fun dbg(msg: String) {
         if (DEBUG) Toast.makeText(this, "HubSync: $msg", Toast.LENGTH_SHORT).show()
     }
 
-    // اسم مصدر النسخ: آخر تطبيق ضغطت فيه نسخ (لو كان من أقل من دقيقة)، وإلا التطبيق اللي قدامك
+    // ---------- تمييز التطبيقات ----------
+
+    private fun isSystemNoise(p: String): Boolean =
+        p == packageName || p == "com.android.systemui" ||
+            p.contains("inputmethod") || p.contains("keyboard")
+
+    private fun isLauncher(p: String): Boolean =
+        p.contains("launcher") || (homePackage != null && p == homePackage)
+
+    private fun isIgnored(p: String): Boolean = isSystemNoise(p) || isLauncher(p)
+
+    private fun labelFor(p: String): String {
+        return try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(p, 0)).toString()
+        } catch (e: Exception) {
+            p.substringAfterLast('.')
+        }
+    }
+
+    private fun currentForegroundPackage(): String? {
+        return try {
+            val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            val w = apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
+            val p = w?.root?.packageName?.toString()
+            if (p != null && !isIgnored(p)) p else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // اسم مصدر النسخ: آخر تطبيق ضغطت فيه نسخ (لو كان من أقل من دقيقة)،
+    // وإلا التطبيق اللي قدامك، وإلا آخر تطبيق حقيقي كنت فيه (مش اللانشر)
     private fun sourceName(): String {
         val c = lastCopyApp
         if (c != null && SystemClock.uptimeMillis() - lastCopyAt < 60_000) return c
-        return getAppName()
+        val p = currentForegroundPackage() ?: lastRealApp
+        return if (p != null) labelFor(p) else "تطبيق"
     }
 
     private fun markCopy(app: String) {
         lastCopyApp = app
         lastCopyAt = SystemClock.uptimeMillis()
     }
+
+    private fun noteSelection(pkg: String) {
+        val now = SystemClock.uptimeMillis()
+        val first = selectionPkg != pkg || now - selectionAt > 5000
+        selectionPkg = pkg
+        selectionAt = now
+        if (first) dbg("تحديد نص في ${labelFor(pkg)}")
+    }
+
+    // ---------- التشغيل ----------
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -94,7 +154,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
             }
             // لما تدوس على مقبض الرف: نقرا الحافظة (المسار اليدوي المضمون)
             shelf?.onOpenedByUser = {
-                requestCapture(manual = true, expectChange = false)
+                requestCapture(manual = true, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
             }
             shelf?.show()
         }
@@ -105,25 +165,29 @@ class ClipboardAccessibilityService : AccessibilityService() {
             val until = maxOf(ignoreClipUntil, HistoryRepository.ignoreClipUntil)
             if (System.currentTimeMillis() < until) return@OnPrimaryClipChangedListener
             dbg("النظام بلّغني بنسخ")
-            markCopy(getAppName())
-            if (!readDirect()) requestCapture(manual = false, expectChange = false)
+            markCopy(sourceName())
+            if (!readDirect()) {
+                requestCapture(manual = false, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
+            }
         }
         clipListener = l
         clipboardManager.addPrimaryClipChangedListener(l)
     }
 
-    // قراءة عادية بدون تركيز: بترجع true لو اتقرت
+    // قراءة عادية بدون تركيز: بترجع true لو اتقرت أو اتجاهلت عن قصد
     private fun readDirect(): Boolean {
         try {
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
+                val d = clip.description
+                val textual = d == null || d.hasMimeType("text/*")
                 val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-                    clip.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
-                val text = clip.getItemAt(0).coerceToText(this)?.toString()
-                if (sensitive) {
-                    dbg("محتوى حساس، اتجاهلته")
+                    d?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
+                if (sensitive || !textual) {
+                    dbg("اتجاهلته (حساس أو مش نص)")
                     return true
                 }
+                val text = clip.getItemAt(0).coerceToText(this)?.toString()
                 if (!text.isNullOrBlank()) {
                     acceptText(text)
                     return true
@@ -142,16 +206,21 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     /**
      * الالتقاط بالتركيز.
-     * expectChange = true معناها: ضغطة نسخ اتشافت، فلو الحافظة لسه فيها النص القديم
-     * بنستنى ونقرا تاني (بعض التطبيقات بتتأخر في تحديث الحافظة).
+     * expectChange: لو الحافظة لسه فيها النص القديم، نستنى ونقرا تاني (بعض التطبيقات بتتأخر).
+     * acceptUnchanged: لو النص فضل زي ما هو بعد كل المحاولات، نسجله برضه (نسخ متكرر مقصود)
      */
-    private fun requestCapture(manual: Boolean, expectChange: Boolean) {
+    private fun requestCapture(
+        manual: Boolean,
+        expectChange: Boolean,
+        acceptUnchanged: Boolean,
+        maxAttempts: Int
+    ) {
         if (captureBusy) return
         val s = shelf ?: return
         captureBusy = true
         // أمان: لو حصل أي حاجة غريبة نفك القفل بعد 6 ثواني
         handler.postDelayed({ captureBusy = false }, 6000)
-        captureLoop(s, 0, lastCaptured, manual, expectChange)
+        captureLoop(s, 0, lastCaptured, manual, expectChange, acceptUnchanged, maxAttempts)
     }
 
     private fun captureLoop(
@@ -159,20 +228,24 @@ class ClipboardAccessibilityService : AccessibilityService() {
         attempt: Int,
         baseline: String?,
         manual: Boolean,
-        expectChange: Boolean
+        expectChange: Boolean,
+        acceptUnchanged: Boolean,
+        maxAttempts: Int
     ) {
-        s.captureClipboard { text, sensitive ->
-            if (sensitive) {
+        s.captureClipboard { text, skipped ->
+            if (skipped) {
                 captureBusy = false
-                dbg("محتوى حساس، اتجاهلته")
+                dbg("اتجاهلته (حساس أو مش نص)")
                 return@captureClipboard
             }
             val t = text
             val empty = t.isNullOrBlank()
             val unchanged = expectChange && !empty && t == baseline
-            if ((empty || unchanged) && attempt < MAX_ATTEMPTS) {
+            if ((empty || unchanged) && attempt < maxAttempts) {
                 handler.postDelayed(
-                    { captureLoop(s, attempt + 1, baseline, manual, expectChange) },
+                    {
+                        captureLoop(s, attempt + 1, baseline, manual, expectChange, acceptUnchanged, maxAttempts)
+                    },
                     350
                 )
             } else {
@@ -182,6 +255,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     if (manual) {
                         Toast.makeText(this, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
                     }
+                } else if (unchanged && !acceptUnchanged) {
+                    dbg("مفيش نسخ جديد")
                 } else {
                     acceptText(t)
                 }
@@ -189,25 +264,50 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
+    // ---------- الأحداث ----------
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        val pkg = event.packageName?.toString() ?: return
+
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                val p = event.packageName?.toString() ?: return
-                if (p != packageName && p != "com.android.systemui" &&
-                    !p.contains("inputmethod") && !p.contains("keyboard")) {
-                    lastApp = p
+                if (isSystemNoise(pkg)) return
+                if (!isLauncher(pkg)) lastRealApp = pkg
+
+                // خرجت من تطبيق بعد ما حددت فيه نص: غالباً نسخت، نفحص الحافظة
+                val sp = selectionPkg
+                if (sp != null && pkg != sp && SystemClock.uptimeMillis() - selectionAt < 60_000) {
+                    selectionPkg = null
+                    markCopy(labelFor(sp))
+                    dbg("خرجت من ${labelFor(sp)} بعد تحديد نص، بفحص الحافظة")
+                    handler.postDelayed({
+                        requestCapture(manual = false, expectChange = true, acceptUnchanged = false, maxAttempts = 1)
+                    }, 500)
                 }
             }
+
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
-                val pkg = event.packageName?.toString()
-                if (pkg == null || pkg == packageName) return
+                if (isSystemNoise(pkg)) return
                 if (looksLikeCopy(event)) {
                     markCopy(labelFor(pkg))
-                    dbg("ضغطة نسخ في ${lastCopyApp}")
+                    dbg("ضغطة نسخ في ${labelFor(pkg)}")
                     // التطبيق محتاج لحظة يحط النص في الحافظة قبل ما نقراه
-                    handler.postDelayed({ requestCapture(manual = false, expectChange = true) }, 150)
+                    handler.postDelayed({
+                        requestCapture(manual = false, expectChange = true, acceptUnchanged = true, maxAttempts = 3)
+                    }, 150)
                 }
+            }
+
+            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> {
+                if (!isIgnored(pkg)) noteSelection(pkg)
+            }
+
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                if (isIgnored(pkg)) return
+                // المؤشر لوحده مش تحديد
+                if (event.fromIndex == event.toIndex) return
+                noteSelection(pkg)
             }
         }
     }
@@ -235,30 +335,6 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private fun updatePrefs(isVisible: Boolean) {
         val prefs = getSharedPreferences("SuperHubPrefs", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("shelf_visible", isVisible).apply()
-    }
-
-    private fun currentForegroundPackage(): String? {
-        return try {
-            val apps = windows.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-            val w = apps.firstOrNull { it.isActive } ?: apps.firstOrNull()
-            val p = w?.root?.packageName?.toString()
-            if (p != null && p != packageName) p else null
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    private fun labelFor(p: String): String {
-        return try {
-            packageManager.getApplicationLabel(packageManager.getApplicationInfo(p, 0)).toString()
-        } catch (e: Exception) {
-            p.substringAfterLast('.')
-        }
-    }
-
-    private fun getAppName(): String {
-        val p = currentForegroundPackage() ?: lastApp ?: return "تطبيق"
-        return labelFor(p)
     }
 
     fun insertIntoFocused(text: String) {
