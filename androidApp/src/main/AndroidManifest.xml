@@ -39,6 +39,13 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Built with BFB.AI: تسمية المجموعات (شاشة صغيرة) -->
+        <activity
+            android:name=".ui.GroupNameActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.DeviceDefault.Dialog" />
+
         <!-- Built with BFB.AI: طلب صلاحية الصور (شفافة وبتقفل لوحدها) -->
         <activity
             android:name=".ui.MediaPermissionActivity"
