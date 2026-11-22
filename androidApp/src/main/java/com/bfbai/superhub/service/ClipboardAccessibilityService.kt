@@ -56,11 +56,16 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var lastImageHash: String? = null
     private var lastImageAt: Long = 0L
 
+    // آخر نص لصقناه إحنا من الرف: لو رجع من الحافظة في التقاط سلبي بنتجاهله
+    private var lastInsertedText: String? = null
+
     // آخر تطبيق حصل فيه تحديد نص (لو خرجت منه بعدها، بنفحص الحافظة)
     private var selectionPkg: String? = null
     private var selectionAt: Long = 0L
 
-    private val copyWords = listOf("copy", "نسخ")
+    private val copyTokens = setOf("copy", "نسخ", "انسخ")
+    private val copyIdRe = Regex("(^|[_.:/\\-])copy([_.:/\\-]|\$)", RegexOption.IGNORE_CASE)
+    private val splitRe = Regex("[^\\p{L}\\p{N}]+")
 
     private val homePackage: String? by lazy {
         try {
@@ -251,7 +256,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * passive: التقاط سلبي (زي لمسة مقبض الرف): لو النص هو اللي المستخدم مسحه من شوية بنتجاهله.
+     * passive: التقاط سلبي (زي لمسة مقبض الرف): لو النص هو اللي المستخدم مسحه أو لسه لاصقه بنتجاهله.
      * manual: طلب صريح من المستخدم (لمسة المقبض): بيتخطى الوضع الخاص والاستثناءات.
      */
     private fun acceptText(text: String, passive: Boolean, manual: Boolean) {
@@ -259,11 +264,17 @@ class ClipboardAccessibilityService : AccessibilityService() {
             dbg("النص ده اتمسح قبل كده، اتجاهلته")
             return
         }
+        // ده النص اللي لسه لاصقه من الرف: ما نحركهوش من مكانه
+        if (passive && text == lastInsertedText) {
+            dbg("ده نص لسه لاصقه، سيبته في مكانه")
+            return
+        }
         if (!manual && !PrivacyPolicy.allowsCapture(sourcePackage())) {
             dbg("الالتقاط متوقف (وضع خاص أو تطبيق مستثنى)")
             return
         }
         HistoryRepository.dismissedText = null
+        if (!passive) lastInsertedText = null
         lastCaptured = text
         val src = sourceName()
         shelf?.add(text, src)
@@ -305,7 +316,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     lastImageAt = now
                     HistoryRepository.dismissedImageHash = null
                     HistoryRepository.addImage(path, src)
-                    shelf?.popOpen()
+                    shelf?.notifyNew("صورة جديدة من $src")
                     dbg("اتسجلت صورة من $src")
                     onFinished(false)
                 }
@@ -456,24 +467,30 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }
     }
 
-    // هل الضغطة كانت على زرار اسمه "نسخ" أو "Copy"؟
+    // هل الضغطة كانت على زرار "نسخ" أو "Copy"؟ مطابقة أدق: أول كلمة لازم تكون "نسخ"/"copy"
+    // ("نسخة احتياطية" و"Copyright" ما بيتحسبوش)
     private fun looksLikeCopy(e: AccessibilityEvent): Boolean {
-        val parts = ArrayList<String>()
+        val texts = ArrayList<String>()
+        var id: String? = null
         try {
-            e.text?.forEach { parts.add(it.toString()) }
-            e.contentDescription?.let { parts.add(it.toString()) }
+            e.text?.forEach { texts.add(it.toString()) }
+            e.contentDescription?.let { texts.add(it.toString()) }
             val n = e.source
             if (n != null) {
-                n.text?.let { parts.add(it.toString()) }
-                n.contentDescription?.let { parts.add(it.toString()) }
-                n.viewIdResourceName?.let { parts.add(it) }
+                n.text?.let { texts.add(it.toString()) }
+                n.contentDescription?.let { texts.add(it.toString()) }
+                id = n.viewIdResourceName
             }
         } catch (ex: Exception) {
         }
-        val joined = parts.joinToString(" ").lowercase()
-        // نص طويل معناه رسالة مش زرار
-        if (joined.isEmpty() || joined.length > 60) return false
-        return copyWords.any { joined.contains(it) }
+        for (t in texts) {
+            val s = t.trim().lowercase()
+            if (s.isEmpty() || s.length > 24) continue
+            val tokens = s.split(splitRe).filter { it.isNotEmpty() }
+            if (tokens.isNotEmpty() && tokens.size <= 3 && tokens[0] in copyTokens) return true
+        }
+        if (id != null && copyIdRe.containsMatchIn(id)) return true
+        return false
     }
 
     private fun updatePrefs(isVisible: Boolean) {
@@ -481,18 +498,21 @@ class ClipboardAccessibilityService : AccessibilityService() {
         prefs.edit().putBoolean("shelf_visible", isVisible).apply()
     }
 
-    fun insertIntoFocused(text: String) {
+    // بيلصق النص في الخانة المفتوحة: بيرجّع true لو نجح
+    fun insertIntoFocused(text: String): Boolean {
         val node = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (node == null) {
             Toast.makeText(this, "اضغط على خانة الكتابة الأول", Toast.LENGTH_SHORT).show()
-            return
+            return false
         }
         ignoreClipUntil = System.currentTimeMillis() + 1000
-        // الحافظة هتبقى فيها النص ده، فنعتبره "اتلقط" عشان ما يترجعش للرف تاني
+        // الحافظة هتبقى فيها النص ده، فنعتبره "اتلقط" ومنلصقه عشان ما يترجعش يتحرك من مكانه
         lastCaptured = text
+        lastInsertedText = text
         clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
 
-        if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) {
+        var ok = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        if (!ok) {
             val old = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
             val s = minOf(node.textSelectionStart.coerceAtLeast(0), old.length)
             val e = minOf(node.textSelectionEnd.coerceAtLeast(s), old.length)
@@ -501,8 +521,9 @@ class ClipboardAccessibilityService : AccessibilityService() {
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, merged)
             }
-            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            ok = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         }
+        return ok
     }
 
     override fun onInterrupt() {}
