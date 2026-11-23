@@ -41,6 +41,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.bfbai.superhub.ui.GroupNameActivity
 import com.bfbai.superhub.ui.HistoryActivity
+import com.bfbai.superhub.ui.SettingsActivity
 import com.bfbai.superhub.utils.Detection
 import com.bfbai.superhub.utils.HistoryRepository
 import com.bfbai.superhub.utils.ImageStore
@@ -86,9 +87,8 @@ private val GROUP_COLORS: IntArray = intArrayOf(
     Color.parseColor("#FF8FB1")
 )
 
-/** كل شكل الرف وسلوكه في مكان واحد، وهنوصله بالإعدادات في خطوة قادمة */
+/** كل شكل الرف وسلوكه في مكان واحد. القيم بتتحمل من الإعدادات (ShelfSettings) */
 object ShelfStyle {
-    // الشكل الكلاسيكي (الافتراضي): لوحة كحلي غامقة + كروت زرقاء شفافة بحد سماوي
     var panelColor: Int = Color.parseColor("#E60B1B3A")
     var panelGradient: Boolean = false
     var panelTop: Int = Color.parseColor("#D91A3563")
@@ -99,17 +99,19 @@ object ShelfStyle {
     var textColor: Int = Color.WHITE
     var subTextColor: Int = Color.parseColor("#9FB3D1")
     var metaColor: Int = Color.parseColor("#4DE1E1")
+    var menuColor: Int = Color.parseColor("#F20E1F42")
     var boldText: Boolean = true
+    var fontFamily: String = ""
+    var textScale: Float = 1f
 
     var cornerDp: Float = 18f
     var cardCornerDp: Float = 14f
 
-    // شفافية الكروت: 0xFF صلب تماماً، 0x59 شفاف نص نص، 0x40 أكتر شفافية، 0x2E زجاجي جداً
+    // شفافية الكروت: 0xFF صلب، 0x59 شفاف نص نص، 0x2E زجاجي جداً
     var cardFillColor: Int = Color.parseColor("#1E3A6D")
     var cardFillAlpha: Int = 0x59
     var cardStrokeColor: Int = Color.parseColor("#4DE1E1")
     var cardStrokeAlpha: Int = 0x66
-    // خيارات للإعدادات: لون الكارت من نوعه، والتدرج
     var cardTintByKind: Boolean = false
     var cardGradient: Boolean = false
     var cardGradientEndAlpha: Int = 0x10
@@ -123,7 +125,6 @@ object ShelfStyle {
     var blurEnabled: Boolean = true
     var blurRadiusDp: Float = 28f
 
-    // أبعاد الرف
     var closedWidthDp: Float = 24f
     var closedHeightDp: Float = 150f
     var expandedWidthDp: Float = 280f
@@ -132,31 +133,27 @@ object ShelfStyle {
     var dropZoneWidthDp: Float = 120f
     var dropZoneHeightDp: Float = 240f
 
-    // المسافة (dp) اللي لما الرف يقربها من حافة بيلتصق بيها
+    // لما الرف يقرب من حافة بالمسافة دي (dp) بيلتصق بيها
     var snapThresholdDp: Float = 24f
 
     var autoCloseMs: Long = 10_000L
     var otpTtlMs: Long = 60_000L
-
-    // أقصى طول نص بيتعرض في الكارت (النص الكامل بيتحفظ كامل)
     var previewChars: Int = 400
 
-    // السحب بيظهر منطقة الإفلات حتى لو الرف مخفي. هيبقى خيار في الإعدادات
+    // السحب من برّه بيظهر منطقة الإفلات حتى لو الرف مخفي
     var dragWakesShelf: Boolean = true
 
-    // سحب الحذف: تدرج من أحمر لطيف لأبيض، ونسبة السحب من عرض الكارت اللي بعدها بيتحذف
+    // سحب الحذف: تدرج من أحمر لطيف لأبيض
     var deleteColorStart: Int = Color.parseColor("#F28B82")
     var deleteColorEnd: Int = Color.WHITE
     var swipeThreshold: Float = 0.4f
 
-    // Throw to close: ترمي الرف بسرعة فيختفي
+    // Throw to close: "hide" يخفيه، "collapse" يطويه لشريط
     var throwEnabled: Boolean = true
-    // "hide" يخفي الرف بالكامل (بتظهره من الـ Tile)، "collapse" يطويه لشريط
     var throwAction: String = "hide"
-    // أقل سرعة (dp في الثانية) تعتبر رمي
     var throwMinSpeedDp: Float = 1200f
 
-    // رسائل التشخيص المؤقتة
+    // رسائل التشخيص الصغيرة (HubSync: ...)
     var debug: Boolean = true
 
     val kindColors: Map<ItemKind, Int> = mapOf(
@@ -173,30 +170,65 @@ object ShelfStyle {
         Color.parseColor("#B8E986")
     )
 
-    // ثيمات جاهزة (للإعدادات لاحقاً): "classic" و "glass"
+    fun tf(style: Int): Typeface {
+        if (fontFamily.isEmpty()) return Typeface.defaultFromStyle(style)
+        return try {
+            Typeface.create(fontFamily, style)
+        } catch (e: Exception) {
+            Typeface.defaultFromStyle(style)
+        }
+    }
+
+    private fun p(
+        panel: String, handle: String, stroke: String, accentC: String, text: String,
+        sub: String, meta: String, menu: String, card: String, cardA: Int,
+        cardStrokeC: String, cardStrokeA: Int, bold: Boolean, blur: Float, neutral: String
+    ) {
+        panelColor = Color.parseColor(panel)
+        handleColor = Color.parseColor(handle)
+        panelStroke = Color.parseColor(stroke)
+        accent = Color.parseColor(accentC)
+        textColor = Color.parseColor(text)
+        subTextColor = Color.parseColor(sub)
+        metaColor = Color.parseColor(meta)
+        menuColor = Color.parseColor(menu)
+        cardFillColor = Color.parseColor(card)
+        cardFillAlpha = cardA
+        cardStrokeColor = Color.parseColor(cardStrokeC)
+        cardStrokeAlpha = cardStrokeA
+        boldText = bold
+        blurRadiusDp = blur
+        neutralColor = Color.parseColor(neutral)
+    }
+
+    // ثيمات جاهزة: classic, glass, aurora, day, amoled
     fun applyPreset(name: String) {
-        if (name == "glass") {
-            panelColor = Color.parseColor("#CC0F2147")
-            panelStroke = Color.parseColor("#40FFFFFF")
-            handleColor = Color.parseColor("#E6102448")
-            cardFillColor = Color.WHITE
-            cardFillAlpha = 0x2E
-            cardStrokeColor = Color.WHITE
-            cardStrokeAlpha = 0x40
-            metaColor = Color.parseColor("#9FB3D1")
-            textColor = Color.parseColor("#F2F7FF")
-            boldText = false
-        } else {
-            panelColor = Color.parseColor("#E60B1B3A")
-            panelStroke = Color.parseColor("#334DE1E1")
-            handleColor = Color.parseColor("#E60B1B3A")
-            cardFillColor = Color.parseColor("#1E3A6D")
-            cardFillAlpha = 0x59
-            cardStrokeColor = Color.parseColor("#4DE1E1")
-            cardStrokeAlpha = 0x66
-            metaColor = Color.parseColor("#4DE1E1")
-            textColor = Color.WHITE
-            boldText = true
+        when (name) {
+            "glass" -> p(
+                "#CC0F2147", "#E6102448", "#40FFFFFF", "#4DE1E1", "#F2F7FF",
+                "#9FB3D1", "#9FB3D1", "#F20E1F42", "#FFFFFF", 0x2E,
+                "#FFFFFF", 0x40, false, 28f, "#B7C7E4"
+            )
+            "aurora" -> p(
+                "#E6070716", "#E6151528", "#1CFFFFFF", "#06B6D4", "#FFFFFF",
+                "#9EFFFFFF", "#06B6D4", "#F2151528", "#A855F7", 0x30,
+                "#A855F7", 0x66, false, 20f, "#C9B8F5"
+            )
+            "day" -> p(
+                "#F2F5F7FB", "#F2FFFFFF", "#1F0F172A", "#A855F7", "#0F172A",
+                "#9E0F172A", "#7C3AED", "#FFFFFFFF", "#FFFFFF", 0xE6,
+                "#0F172A", 0x1F, false, 20f, "#475569"
+            )
+            "amoled" -> p(
+                "#F2000000", "#FF000000", "#26FFFFFF", "#4DE1E1", "#FFFFFF",
+                "#99FFFFFF", "#4DE1E1", "#FF0A0A0A", "#1A1A1A", 0xFF,
+                "#FFFFFF", 0x22, true, 20f, "#B7C7E4"
+            )
+            else -> p(
+                "#E60B1B3A", "#E60B1B3A", "#334DE1E1", "#4DE1E1", "#FFFFFF",
+                "#9FB3D1", "#4DE1E1", "#F20E1F42", "#1E3A6D", 0x59,
+                "#4DE1E1", 0x66, true, 28f, "#B7C7E4"
+            )
         }
     }
 }
@@ -238,7 +270,6 @@ private class TrashView(ctx: Context) : View(ctx) {
         val scale = 0.7f + 0.3f * p
         canvas.scale(scale, scale, width / 2f, height / 2f)
 
-        // جسم السلة
         val body = Path()
         body.moveTo(6f * s, 9f * s)
         body.lineTo(7f * s, 20f * s)
@@ -250,7 +281,6 @@ private class TrashView(ctx: Context) : View(ctx) {
         canvas.drawLine(10f * s, 12f * s, 10f * s, 18f * s, paint)
         canvas.drawLine(14f * s, 12f * s, 14f * s, 18f * s, paint)
 
-        // الغطا بيتفتح مع السحب
         canvas.save()
         canvas.rotate(-28f * p, 19f * s, 6f * s)
         canvas.drawLine(4f * s, 6f * s, 20f * s, 6f * s, paint)
@@ -352,6 +382,10 @@ class ShelfController(
     private val ctx: Context,
     private val onInsert: (String) -> Boolean
 ) {
+    init {
+        ShelfSettings.init(ctx)
+    }
+
     private val wm: WindowManager = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val dp: Float = ctx.resources.displayMetrics.density
     private val handler = Handler(Looper.getMainLooper())
@@ -373,7 +407,7 @@ class ShelfController(
     private var userHidden: Boolean = false
     private var dropActive: Boolean = false
 
-    // مكان الرف: الزاوية العلوية الشمال للشريط، وأي حافة ملتصق بيها
+    // مكان الرف: الزاوية العلوية الشمال، وأي حافة ملتصق بيها
     private var posX: Int = 0
     private var posY: Int = 0
     private var snapL: Boolean = false
@@ -384,6 +418,9 @@ class ShelfController(
     private var ignoreOutsideUntil: Long = 0L
     private var tracker: VelocityTracker? = null
     private var snapAnim: ValueAnimator? = null
+
+    // الكارت اللي بيتسحب داخل الرف (للضم في مجموعة)
+    private var dragSource: ShelfItem? = null
 
     var onShownChanged: ((Boolean) -> Unit)? = null
     var appNameProvider: (() -> String)? = null
@@ -399,6 +436,7 @@ class ShelfController(
     private val topBar: LinearLayout = LinearLayout(ctx)
     private val titleTv: TextView = TextView(ctx)
     private val countTv: TextView = TextView(ctx)
+    private val menuBtn: TextView = TextView(ctx)
     private val grip: View = View(ctx)
     private val selectBar: LinearLayout = LinearLayout(ctx)
     private val selectCountTv: TextView = TextView(ctx)
@@ -422,15 +460,20 @@ class ShelfController(
         if (mode == Mode.OPEN || mode == Mode.PEEK) setMode(Mode.BAR)
     }
 
+    // بعد فترة من غير لمس: الرف العايم بيروح لأقرب حافة
+    private val driftRunnable: Runnable = Runnable { driftToEdge() }
+
     // بيحذف أكواد التحقق المنتهية ويحدّث العد التنازلي كل ثانية
     private val ticker: Runnable = object : Runnable {
         override fun run() {
             val now = System.currentTimeMillis()
             var alive = false
             val expired = ArrayList<ShelfItem>()
-            for (item in shownItems) {
-                if (item.imagePath == null && !item.isPinned && detectOf(item.text).kind == ItemKind.OTP) {
-                    if (now - item.timestamp >= ShelfStyle.otpTtlMs) expired.add(item) else alive = true
+            if (ShelfBehavior.otpAutoDelete) {
+                for (item in shownItems) {
+                    if (item.imagePath == null && !item.isPinned && detectOf(item.text).kind == ItemKind.OTP) {
+                        if (now - item.timestamp >= ShelfStyle.otpTtlMs) expired.add(item) else alive = true
+                    }
                 }
             }
             for (item in expired) HistoryRepository.remove(item)
@@ -444,6 +487,7 @@ class ShelfController(
 
     private fun px(v: Int): Int = (v * dp).toInt()
     private fun px(v: Float): Int = (v * dp).toInt()
+    private fun sz(v: Float): Float = v * ShelfStyle.textScale
 
     init {
         ShelfBehavior.init(ctx)
@@ -463,7 +507,7 @@ class ShelfController(
             snapR = true
         }
 
-        // المحتوى دايماً من اليمين لليسار على الجانبين، والهندسة بتتعكس بالزوايا بس
+        // المحتوى دايماً من اليمين لليسار على الجانبين، واليمين والشمال متطابقين هندسياً
         root.layoutDirection = View.LAYOUT_DIRECTION_RTL
 
         // قص المحتوى على زوايا الرف (من غير ركن مربّع)
@@ -473,13 +517,13 @@ class ShelfController(
                     outline.setEmpty()
                     return
                 }
-                val p = Path()
-                p.addRoundRect(
+                val path = Path()
+                path.addRoundRect(
                     RectF(0f, 0f, view.width.toFloat(), view.height.toFloat()),
                     cornerRadii(),
                     Path.Direction.CW
                 )
-                outline.setConvexPath(p)
+                outline.setConvexPath(path)
             }
         }
         root.clipToOutline = true
@@ -505,17 +549,13 @@ class ShelfController(
         titleBox.orientation = LinearLayout.VERTICAL
         titleBox.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         titleTv.text = "HubSync"
-        titleTv.setTextColor(ShelfStyle.textColor)
         titleTv.textSize = 16f
-        titleTv.setTypeface(null, Typeface.BOLD)
-        countTv.setTextColor(ShelfStyle.subTextColor)
+        titleTv.typeface = ShelfStyle.tf(Typeface.BOLD)
         countTv.textSize = 11f
         titleBox.addView(titleTv)
         titleBox.addView(countTv)
 
-        val menuBtn = TextView(ctx)
         menuBtn.text = "⋮"
-        menuBtn.setTextColor(ShelfStyle.accent)
         menuBtn.textSize = 22f
         menuBtn.gravity = Gravity.CENTER
         menuBtn.setPadding(px(14), px(6), px(14), px(6))
@@ -528,7 +568,6 @@ class ShelfController(
         // مقبض صغير بيظهر والرف مطوي
         val gripBg = GradientDrawable()
         gripBg.cornerRadius = 3 * dp
-        gripBg.setColor(withAlpha(ShelfStyle.accent, 0xCC))
         grip.background = gripBg
 
         // شريط التحديد (تجميع / إخراج / حذف / إلغاء)
@@ -536,20 +575,13 @@ class ShelfController(
         selectBar.gravity = Gravity.CENTER_VERTICAL
         selectBar.setPadding(px(12), px(4), px(8), px(4))
         selectCountTv.textSize = 12f
-        selectCountTv.setTextColor(ShelfStyle.subTextColor)
         selectCountTv.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        selectBar.addView(selectCountTv)
-        selectBar.addView(pill("تجميع", ShelfStyle.accent, true) { doGroupSelected() })
-        selectBar.addView(pill("إخراج", ShelfStyle.accent, false) { doUngroupSelected() })
-        selectBar.addView(pill("حذف", ShelfStyle.deleteColorStart, false) { doDeleteSelected() })
-        selectBar.addView(pill("إلغاء", ShelfStyle.subTextColor, false) { exitSelect(true) })
 
         // منطقة الإفلات
         dropTv.text = "أفلت\nهنا"
         dropTv.gravity = Gravity.CENTER
         dropTv.textSize = 15f
-        dropTv.setTypeface(null, Typeface.BOLD)
-        dropTv.setTextColor(ShelfStyle.accent)
+        dropTv.typeface = ShelfStyle.tf(Typeface.BOLD)
 
         root.addView(grip, FrameLayout.LayoutParams(px(3), px(40), Gravity.CENTER))
         root.addView(topBar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, headerPx))
@@ -571,6 +603,28 @@ class ShelfController(
             )
         )
 
+        // الإفلات على مساحة فاضية جوه الرف (للسحب الداخلي) بيطلّع الكارت من مجموعته
+        list.setOnDragListener { _, e ->
+            when (e.action) {
+                DragEvent.ACTION_DRAG_STARTED ->
+                    e.localState == INTERNAL_DRAG && dragSource != null && ShelfBehavior.dragToGroup
+                DragEvent.ACTION_DROP -> {
+                    val s = dragSource
+                    if (s != null && s.groupId != null) {
+                        HistoryRepository.removeFromGroup(listOf(s))
+                        Toast.makeText(ctx, "اتشال من المجموعة", Toast.LENGTH_SHORT).show()
+                    }
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    dragSource = null
+                    resetAutoClose()
+                    true
+                }
+                else -> true
+            }
+        }
+
         // أي تغيير في المخزن (من الرف أو من شاشة السجل) بيتعرض هنا فوراً
         HistoryRepository.items
             .onEach { all ->
@@ -585,6 +639,11 @@ class ShelfController(
                 manualInfo = m
                 render()
             }
+            .launchIn(scope)
+
+        // أي تغيير في الإعدادات بيظهر فوراً
+        ShelfSettings.changes
+            .onEach { onStyleChanged() }
             .launchIn(scope)
 
         root.setOnTouchListener(object : View.OnTouchListener {
@@ -606,6 +665,7 @@ class ShelfController(
                 if (event.action == MotionEvent.ACTION_OUTSIDE) {
                     // لمسة بعد ما الرف يتفتح بلحظة (مثلاً ضغطة نسخ) ما تقفلوش
                     if (SystemClock.uptimeMillis() < ignoreOutsideUntil) return true
+                    if (dragSource != null) return true
                     if (customMenu != null) {
                         hideCustomMenu()
                     } else if (mode == Mode.OPEN || mode == Mode.PEEK) {
@@ -620,6 +680,7 @@ class ShelfController(
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         snapAnim?.cancel()
+                        handler.removeCallbacks(driftRunnable)
                         startX = lp.x
                         startY = lp.y
                         touchX = event.rawX
@@ -715,10 +776,46 @@ class ShelfController(
 
         root.setOnDragListener { _, e -> handleDrag(e) }
 
+        buildSelectBar()
+        updateColors()
         updateTitle()
         applyVisual()
         applyGeometry()
         updateBackground()
+    }
+
+    // ---------- الإعدادات ----------
+
+    private fun updateColors() {
+        countTv.setTextColor(ShelfStyle.subTextColor)
+        countTv.typeface = ShelfStyle.tf(Typeface.NORMAL)
+        menuBtn.setTextColor(ShelfStyle.accent)
+        selectCountTv.setTextColor(ShelfStyle.subTextColor)
+        dropTv.setTextColor(ShelfStyle.accent)
+        dropTv.typeface = ShelfStyle.tf(Typeface.BOLD)
+        titleTv.typeface = ShelfStyle.tf(Typeface.BOLD)
+    }
+
+    private fun onStyleChanged() {
+        updateColors()
+        buildSelectBar()
+        updateTitle()
+        applyGeometry()
+        updateBackground()
+        applyVisual()
+        applyBlur()
+        flushLayout()
+        render()
+        scheduleDrift()
+    }
+
+    private fun buildSelectBar() {
+        selectBar.removeAllViews()
+        selectBar.addView(selectCountTv)
+        selectBar.addView(pill("تجميع", ShelfStyle.accent, true) { doGroupSelected() })
+        selectBar.addView(pill("إخراج", ShelfStyle.accent, false) { doUngroupSelected() })
+        selectBar.addView(pill("حذف", ShelfStyle.deleteColorStart, false) { doDeleteSelected() })
+        selectBar.addView(pill("إلغاء", ShelfStyle.subTextColor, false) { exitSelect(true) })
     }
 
     // ---------- الشاشة والهندسة ----------
@@ -779,7 +876,7 @@ class ShelfController(
         lp.height = s[1]
         lp.x = anchorX(s[0], posX)
         lp.y = anchorY(s[1], posY)
-        lp.gravity = Gravity.TOP or Gravity.START
+        lp.gravity = Gravity.TOP or Gravity.LEFT
     }
 
     private fun flushLayout() {
@@ -818,6 +915,7 @@ class ShelfController(
             flushLayout()
         }
         ShelfBehavior.savePosition(posX, posY, snapL, snapR, snapT, snapB)
+        scheduleDrift()
     }
 
     private fun animateTo(tx: Int, ty: Int) {
@@ -826,7 +924,7 @@ class ShelfController(
         val sy = lp.y
         if (sx == tx && sy == ty) return
         val a = ValueAnimator.ofFloat(0f, 1f)
-        a.duration = 140
+        a.duration = 160
         a.addUpdateListener { v ->
             val t = v.animatedValue as Float
             lp.x = (sx + (tx - sx) * t).toInt()
@@ -837,17 +935,42 @@ class ShelfController(
         a.start()
     }
 
-    // لون واحد شفاف (التدرج خيار) + حد خفيف. والمطوي لون المقبض
+    // ---------- الانزلاق لأقرب حافة بعد فترة ----------
+
+    private fun scheduleDrift() {
+        handler.removeCallbacks(driftRunnable)
+        if (!ShelfBehavior.idleDrift || mode != Mode.BAR || userHidden || !added) return
+        if (snapL || snapR || snapT || snapB) return
+        handler.postDelayed(driftRunnable, ShelfBehavior.idleDriftSec * 1000L)
+    }
+
+    private fun driftToEdge() {
+        if (mode != Mode.BAR || userHidden || !added) return
+        val dl = lp.x
+        val dr = screenW() - (lp.x + lp.width)
+        snapL = dl <= dr
+        snapR = !snapL
+        snapT = false
+        snapB = false
+        posX = lp.x
+        posY = lp.y
+        updateBackground()
+        animateTo(anchorX(lp.width, lp.x), anchorY(lp.height, lp.y))
+        ShelfBehavior.savePosition(posX, posY, snapL, snapR, snapT, snapB)
+    }
+
+    // ---------- الخلفية ----------
+
     private fun updateBackground() {
         val bg = GradientDrawable()
         bg.shape = GradientDrawable.RECTANGLE
         val open = mode == Mode.OPEN || mode == Mode.PEEK
-        if (open && mode == Mode.OPEN && ShelfStyle.panelGradient) {
+        if (mode == Mode.OPEN && ShelfStyle.panelGradient) {
             bg.setOrientation(GradientDrawable.Orientation.TOP_BOTTOM)
             bg.setColors(intArrayOf(ShelfStyle.panelTop, ShelfStyle.panelBottom))
         } else {
             val fill = when {
-                mode == Mode.DROP -> withAlpha(ShelfStyle.accent, if (dropActive) 0x70 else 0x38)
+                mode == Mode.DROP -> withAlpha(ShelfStyle.accent, if (dropActive) 0x70 else 0x14)
                 open -> ShelfStyle.panelColor
                 else -> ShelfStyle.handleColor
             }
@@ -855,11 +978,11 @@ class ShelfController(
         }
         bg.cornerRadii = cornerRadii()
         val strokeColor = when {
-            mode == Mode.DROP -> withAlpha(ShelfStyle.accent, if (dropActive) 0xFF else 0xB0)
+            mode == Mode.DROP -> withAlpha(ShelfStyle.accent, if (dropActive) 0xFF else 0x30)
             open -> ShelfStyle.panelStroke
             else -> withAlpha(ShelfStyle.accent, 0x80)
         }
-        bg.setStroke(if (mode == Mode.DROP) px(2) else px(1), strokeColor)
+        bg.setStroke(if (mode == Mode.DROP && dropActive) px(2) else px(1), strokeColor)
         root.background = bg
         root.invalidateOutline()
     }
@@ -886,7 +1009,7 @@ class ShelfController(
         selectBar.visibility = if (open && selectMode) View.VISIBLE else View.GONE
         scroll.visibility = if (open || mode == Mode.PEEK) View.VISIBLE else View.GONE
         grip.visibility = if (mode == Mode.BAR) View.VISIBLE else View.GONE
-        dropTv.visibility = if (mode == Mode.DROP) View.VISIBLE else View.GONE
+        dropTv.visibility = if (mode == Mode.DROP && dropActive) View.VISIBLE else View.GONE
 
         val sp = scroll.layoutParams as FrameLayout.LayoutParams
         sp.topMargin = if (open) headerPx + (if (selectMode) selectBarPx else 0) else 0
@@ -899,6 +1022,7 @@ class ShelfController(
 
     private fun setMode(m: Mode) {
         handler.removeCallbacks(collapseRunnable)
+        handler.removeCallbacks(driftRunnable)
         mode = m
         if (m != Mode.OPEN) {
             hideCustomMenu()
@@ -914,11 +1038,12 @@ class ShelfController(
         flushLayout()
         if (m == Mode.PEEK) scroll.scrollTo(0, 0)
         resetAutoClose()
+        if (m == Mode.BAR) scheduleDrift()
     }
 
     private fun resetAutoClose() {
         handler.removeCallbacks(collapseRunnable)
-        if (selectMode) return
+        if (selectMode || dragSource != null) return
         when (mode) {
             Mode.OPEN -> handler.postDelayed(collapseRunnable, ShelfStyle.autoCloseMs)
             Mode.PEEK -> handler.postDelayed(collapseRunnable, ShelfBehavior.peekMs.toLong())
@@ -1063,7 +1188,8 @@ class ShelfController(
                 val clip = cm.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val d = clip.description
-                    val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                    val sensitive = ShelfBehavior.ignoreSensitive &&
+                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
                         d?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
                     val first = clip.getItemAt(0)
                     val u = first.uri
@@ -1087,7 +1213,7 @@ class ShelfController(
                 flushLayout()
                 onResult(text, uri, skip)
             }
-        }, if (n == 0) 140L else 220L)
+        }, if (n == 0) 70L else 120L)
     }
 
     // النصوص الطويلة ما بنحللهاش (بتبطّئ، ومحدش بيعمل OTP أو رابط من 1000 حرف)
@@ -1101,7 +1227,7 @@ class ShelfController(
         return d
     }
 
-    // ---------- السحب والإفلات ----------
+    // ---------- السحب والإفلات من برّه ----------
 
     private fun isAcceptable(d: ClipDescription?): Boolean =
         d != null && (d.hasMimeType("text/*") || d.hasMimeType("image/*"))
@@ -1109,7 +1235,7 @@ class ShelfController(
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
-                // سحب خارج من الرف نفسه: مش بنقبله تاني
+                // سحب خارج من الرف نفسه: بيتعامل معاه الكروت والقايمة مش النافذة
                 if (e.localState == INTERNAL_DRAG) return false
                 if (!isAcceptable(e.clipDescription)) {
                     dbgToast("سحب مش نص ولا صورة")
@@ -1117,20 +1243,22 @@ class ShelfController(
                 }
                 if (userHidden && !ShelfStyle.dragWakesShelf) return false
                 dropActive = false
-                // منطقة إفلات صغيرة بدل ما الرف يتفتح كله
+                // منطقة إفلات شبه مخفية: بتنوّر لما إصبعك يدخلها
                 if (mode != Mode.OPEN) setMode(Mode.DROP)
-                dbgToast("بدأ سحب: منطقة الإفلات ظهرت")
+                dbgToast("بدأ سحب: منطقة الإفلات جاهزة")
                 return true
             }
 
             DragEvent.ACTION_DRAG_ENTERED -> {
                 dropActive = true
+                applyVisual()
                 updateBackground()
                 return true
             }
 
             DragEvent.ACTION_DRAG_EXITED -> {
                 dropActive = false
+                applyVisual()
                 updateBackground()
                 return true
             }
@@ -1362,7 +1490,8 @@ class ShelfController(
             val empty = TextView(ctx)
             empty.text = "الرف فارغ\nانسخ أي نص أو اسحبه هنا"
             empty.setTextColor(ShelfStyle.subTextColor)
-            empty.textSize = 13f
+            empty.typeface = ShelfStyle.tf(Typeface.NORMAL)
+            empty.textSize = sz(13f)
             empty.gravity = Gravity.CENTER
             empty.setPadding(0, px(40), 0, 0)
             list.addView(empty)
@@ -1402,6 +1531,9 @@ class ShelfController(
 
     private fun keyOf(item: ShelfItem): String =
         "${item.timestamp}|${item.imagePath ?: item.text.hashCode().toString()}"
+
+    private fun sameItem(a: ShelfItem, b: ShelfItem): Boolean =
+        a.timestamp == b.timestamp && a.text == b.text && a.imagePath == b.imagePath
 
     private fun toggleSelected(item: ShelfItem) {
         val k = keyOf(item)
@@ -1470,6 +1602,17 @@ class ShelfController(
         }
     }
 
+    private fun openScreen(cls: Class<*>) {
+        setMode(Mode.BAR)
+        val intent = Intent(ctx, cls)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            ctx.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(ctx, "افتح التطبيق من الأيقونة", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // ---------- القايمة ----------
 
     private fun showCustomMenu() {
@@ -1482,7 +1625,7 @@ class ShelfController(
         menu.setPadding(mp, mp, mp, mp)
         val mbg = GradientDrawable()
         mbg.cornerRadius = 14 * dp
-        mbg.setColor(Color.parseColor("#F20E1F42"))
+        mbg.setColor(ShelfStyle.menuColor)
         mbg.setStroke(px(1), ShelfStyle.panelStroke)
         menu.background = mbg
 
@@ -1507,6 +1650,7 @@ class ShelfController(
             val key = entry.first
             val tv = TextView(ctx)
             tv.text = entry.second
+            tv.typeface = ShelfStyle.tf(Typeface.NORMAL)
             tv.setTextColor(
                 when (key) {
                     "private" -> PRIVATE_COLOR
@@ -1519,16 +1663,7 @@ class ShelfController(
             tv.setOnClickListener {
                 hideCustomMenu()
                 when (key) {
-                    "history" -> {
-                        setMode(Mode.BAR)
-                        val intent = Intent(ctx, HistoryActivity::class.java)
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        try {
-                            ctx.startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(ctx, "افتح التطبيق من الأيقونة", Toast.LENGTH_SHORT).show()
-                        }
-                    }
+                    "history" -> openScreen(HistoryActivity::class.java)
                     "select" -> enterSelect()
                     "group" -> {
                         if (manualInfo == null) {
@@ -1539,7 +1674,7 @@ class ShelfController(
                         }
                     }
                     "private" -> togglePrivate()
-                    "settings" -> Toast.makeText(ctx, "الإعدادات قريباً", Toast.LENGTH_SHORT).show()
+                    "settings" -> openScreen(SettingsActivity::class.java)
                     "close" -> setMode(Mode.BAR)
                 }
             }
@@ -1574,8 +1709,10 @@ class ShelfController(
         Toast.makeText(ctx, "تم النسخ", Toast.LENGTH_SHORT).show()
     }
 
-    private fun copyImage(path: String) {
+    // نسخ صورة للحافظة: بنعلّمها "اتنسخت" من غير ما نغيّر مكانها
+    private fun copyImage(item: ShelfItem, path: String) {
         if (ImageStore.copyImage(ctx, path)) {
+            HistoryRepository.markPasted(item, true)
             Toast.makeText(ctx, "تم نسخ الصورة، الصقها في المكان اللي عايزه", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(ctx, "تعذر نسخ الصورة", Toast.LENGTH_SHORT).show()
@@ -1660,7 +1797,7 @@ class ShelfController(
         val tv = TextView(ctx)
         tv.text = label
         tv.textSize = 12f
-        tv.setTypeface(null, if (primary) Typeface.BOLD else Typeface.NORMAL)
+        tv.typeface = ShelfStyle.tf(if (primary) Typeface.BOLD else Typeface.NORMAL)
         tv.setPadding(px(14), px(6), px(14), px(6))
         val b = GradientDrawable()
         b.cornerRadius = 20 * dp
@@ -1684,6 +1821,62 @@ class ShelfController(
             onClick()
         }
         return tv
+    }
+
+    // ---------- السحب داخل الرف (ضم كارت لمجموعة) ----------
+
+    private fun highlight(v: View, on: Boolean) {
+        if (on) {
+            val d = GradientDrawable()
+            d.cornerRadius = ShelfStyle.cardCornerDp * dp
+            d.setColor(withAlpha(ShelfStyle.accent, 0x22))
+            d.setStroke(px(2), ShelfStyle.accent)
+            v.foreground = d
+            v.scaleX = 1.03f
+            v.scaleY = 1.03f
+        } else {
+            v.foreground = null
+            v.scaleX = 1f
+            v.scaleY = 1f
+        }
+    }
+
+    private fun attachInternalDrop(view: View, target: ShelfItem) {
+        view.setOnDragListener { v, e ->
+            val src = dragSource
+            when (e.action) {
+                DragEvent.ACTION_DRAG_STARTED -> {
+                    if (e.localState != INTERNAL_DRAG || src == null || !ShelfBehavior.dragToGroup) {
+                        false
+                    } else {
+                        if (sameItem(src, target)) v.alpha = 0.4f
+                        true
+                    }
+                }
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    if (src != null && !sameItem(src, target)) highlight(v, true)
+                    true
+                }
+                DragEvent.ACTION_DRAG_EXITED -> {
+                    highlight(v, false)
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    highlight(v, false)
+                    if (src != null && !sameItem(src, target)) {
+                        HistoryRepository.dropOn(src, target)
+                        Toast.makeText(ctx, "اتضافت للمجموعة", Toast.LENGTH_SHORT).show()
+                    }
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    highlight(v, false)
+                    v.alpha = 1f
+                    true
+                }
+                else -> true
+            }
+        }
     }
 
     // ---------- شكل الكروت ----------
@@ -1720,7 +1913,7 @@ class ShelfController(
         return p
     }
 
-    // الصف الأول: (مربع تحديد) + شارة النوع + علامة اتلصق + عد تنازلي + نجمة + حذف
+    // الصف الأول: (مربع تحديد) + شارة النوع + علامة اتلصق/اتنسخت + عد تنازلي + نجمة + حذف
     private fun buildTopRow(
         item: ShelfItem,
         label: String,
@@ -1745,7 +1938,7 @@ class ShelfController(
         chip.text = label
         chip.textSize = 11f
         chip.setTextColor(color)
-        chip.setTypeface(null, Typeface.BOLD)
+        chip.typeface = ShelfStyle.tf(Typeface.BOLD)
         chip.setPadding(px(9), px(2), px(9), px(2))
         val chipBg = GradientDrawable()
         chipBg.cornerRadius = 20 * dp
@@ -1753,10 +1946,10 @@ class ShelfController(
         chip.background = chipBg
         top.addView(chip)
 
-        // علامة "اتلصق": دوس عليها تلغيها
+        // علامة "اتلصق" (أو "اتنسخت" للصور): دوس عليها تلغيها
         if (item.pastedAt > 0L && !selectMode) {
             val pc = TextView(ctx)
-            pc.text = "✓ اتلصق"
+            pc.text = if (item.imagePath != null) "✓ اتنسخت" else "✓ اتلصق"
             pc.textSize = 10.5f
             pc.setTextColor(ShelfStyle.accent)
             pc.setPadding(px(8), px(2), px(8), px(2))
@@ -1778,7 +1971,7 @@ class ShelfController(
         spacer.layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
         top.addView(spacer)
 
-        if (otp && !item.isPinned) {
+        if (otp && !item.isPinned && ShelfBehavior.otpAutoDelete) {
             val cd = TextView(ctx)
             cd.textSize = 11f
             cd.setTextColor(ShelfStyle.subTextColor)
@@ -1813,7 +2006,8 @@ class ShelfController(
         val meta = TextView(ctx)
         meta.text = "${item.source} • ${timeFormat.format(Date(item.timestamp))}"
         meta.setTextColor(ShelfStyle.metaColor)
-        meta.textSize = 11f
+        meta.typeface = ShelfStyle.tf(Typeface.NORMAL)
+        meta.textSize = sz(11f)
         return meta
     }
 
@@ -1870,7 +2064,7 @@ class ShelfController(
         frame.onProgress = { p, dir ->
             redBg.alpha = p * 0.95f
             trash.progress = p
-            // الأحمر عند ناحية السلة (جامد) ويتدرج لأبيض ناحية الكارت
+            // الأحمر عند ناحية السلة ويتدرج لأبيض ناحية الكارت
             redDrawable.orientation = if (dir > 0) {
                 GradientDrawable.Orientation.LEFT_RIGHT
             } else {
@@ -1924,8 +2118,8 @@ class ShelfController(
             }
             content.text = shown
             content.setTextColor(ShelfStyle.textColor)
-            content.setTypeface(null, if (ShelfStyle.boldText) Typeface.BOLD else Typeface.NORMAL)
-            content.textSize = 14f
+            content.typeface = ShelfStyle.tf(if (ShelfStyle.boldText) Typeface.BOLD else Typeface.NORMAL)
+            content.textSize = sz(14f)
             content.maxLines = 3
             content.ellipsize = android.text.TextUtils.TruncateAt.END
         }
@@ -1972,12 +2166,18 @@ class ShelfController(
             if (selectMode) toggleSelected(item) else insertItem(item)
         }
         if (!selectMode) {
+            // ضغطة مطولة وسحب: فوق كارت/مجموعة جوه الرف بيضم، وفوق تطبيق تاني بيلصق
             card.setOnLongClickListener { v: View ->
+                dragSource = item
                 val clip = ClipData.newPlainText("hubsync", payloadOf(item))
-                v.startDragAndDrop(clip, View.DragShadowBuilder(v), INTERNAL_DRAG, View.DRAG_FLAG_GLOBAL)
+                val ok = v.startDragAndDrop(clip, View.DragShadowBuilder(v), INTERNAL_DRAG, View.DRAG_FLAG_GLOBAL)
+                if (!ok) dragSource = null
+                ok
             }
         }
-        return wrapSwipe(card, item, compact)
+        val frame = wrapSwipe(card, item, compact)
+        attachInternalDrop(frame, item)
+        return frame
     }
 
     private fun buildImageCard(item: ShelfItem, compact: Boolean): View {
@@ -1989,6 +2189,7 @@ class ShelfController(
         card.orientation = LinearLayout.VERTICAL
         card.setPadding(pad, pad, pad, pad)
         card.background = cardBackground(color, selectMode && selected.contains(keyOf(item)))
+        if (item.pastedAt > 0L && ShelfBehavior.pasteDim) card.alpha = ShelfStyle.pastedAlpha
 
         card.addView(buildTopRow(item, "صورة", color, card, false))
 
@@ -2019,7 +2220,7 @@ class ShelfController(
             actions.addView(pill("مشاركة", color, true) {
                 startExternal(ImageStore.shareIntent(ctx, path))
             })
-            actions.addView(pill("نسخ", color, false) { copyImage(path) })
+            actions.addView(pill("نسخ", color, false) { copyImage(item, path) })
             card.addView(actions)
         }
 
@@ -2027,28 +2228,34 @@ class ShelfController(
             if (selectMode) {
                 toggleSelected(item)
             } else {
-                copyImage(path)
+                copyImage(item, path)
                 setMode(Mode.BAR)
             }
         }
-        // سحب الصورة لتطبيق تاني (بيشتغل لو التطبيق الهدف بيقبل صور)
+        // ضغطة مطولة: ضم لمجموعة جوه الرف، أو سحب الصورة لتطبيق تاني (لو بيقبل صور)
         if (!selectMode) {
             card.setOnLongClickListener { v: View ->
                 try {
+                    dragSource = item
                     val uri = ImageStore.uriFor(ctx, path)
                     val clip = ClipData.newUri(ctx.contentResolver, "hubsync-image", uri)
-                    v.startDragAndDrop(
+                    val ok = v.startDragAndDrop(
                         clip,
                         View.DragShadowBuilder(v),
                         INTERNAL_DRAG,
                         View.DRAG_FLAG_GLOBAL or View.DRAG_FLAG_GLOBAL_URI_READ
                     )
+                    if (!ok) dragSource = null
+                    ok
                 } catch (e: Exception) {
+                    dragSource = null
                     false
                 }
             }
         }
-        return wrapSwipe(card, item, compact)
+        val frame = wrapSwipe(card, item, compact)
+        attachInternalDrop(frame, item)
+        return frame
     }
 
     // ---------- المجموعات ----------
@@ -2070,10 +2277,41 @@ class ShelfController(
         val nm = m.name
         tv.text = "مجموعة قيد الإنشاء" + (if (nm != null) ": $nm" else "") + " • $count"
         tv.textSize = 12f
+        tv.typeface = ShelfStyle.tf(Typeface.NORMAL)
         tv.setTextColor(MANUAL_COLOR)
         tv.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         row.addView(tv)
         row.addView(pill("إنهاء", MANUAL_COLOR, true) { HistoryRepository.endManualGroup() })
+        return row
+    }
+
+    // سطر معاينة صغير لعنصر داخل مجموعة مطوية
+    private fun previewLine(mem: ShelfItem, color: Int): View {
+        val row = LinearLayout(ctx)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(px(6), px(3), px(6), px(3))
+
+        val dot = View(ctx)
+        val dotBg = GradientDrawable()
+        dotBg.shape = GradientDrawable.OVAL
+        dotBg.setColor(withAlpha(color, 0xCC))
+        dot.background = dotBg
+        val dp1 = LinearLayout.LayoutParams(px(6), px(6))
+        dp1.marginEnd = px(8)
+        dot.layoutParams = dp1
+        row.addView(dot)
+
+        val tv = TextView(ctx)
+        val base = if (mem.imagePath != null) "[صورة]" else mem.text.replace('\n', ' ').trim()
+        val clipped = if (base.length > 44) base.substring(0, 44) + "…" else base
+        tv.text = (if (mem.pastedAt > 0L) "✓ " else "") + clipped
+        tv.textSize = sz(13f)
+        tv.maxLines = 1
+        tv.typeface = ShelfStyle.tf(Typeface.NORMAL)
+        tv.setTextColor(if (mem.pastedAt > 0L) ShelfStyle.subTextColor else ShelfStyle.textColor)
+        tv.ellipsize = android.text.TextUtils.TruncateAt.END
+        row.addView(tv)
         return row
     }
 
@@ -2120,7 +2358,7 @@ class ShelfController(
             kc.text = "ملف كود"
             kc.textSize = 10.5f
             kc.setTextColor(color)
-            kc.setTypeface(null, Typeface.BOLD)
+            kc.typeface = ShelfStyle.tf(Typeface.BOLD)
             kc.setPadding(px(8), px(2), px(8), px(2))
             val kcBg = GradientDrawable()
             kcBg.cornerRadius = 20 * dp
@@ -2137,9 +2375,9 @@ class ShelfController(
 
         val titleView = TextView(ctx)
         titleView.text = title
-        titleView.textSize = 14f
+        titleView.textSize = sz(14f)
         titleView.setTextColor(ShelfStyle.textColor)
-        titleView.setTypeface(null, Typeface.BOLD)
+        titleView.typeface = ShelfStyle.tf(Typeface.BOLD)
         titleView.maxLines = 1
         titleView.ellipsize = android.text.TextUtils.TruncateAt.END
         titleView.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -2179,23 +2417,39 @@ class ShelfController(
         }
         box.addView(head)
 
-        if (!collapsed) {
-            val act = newActionsRow()
-            val ap = act.layoutParams as LinearLayout.LayoutParams
-            ap.topMargin = 0
-            ap.bottomMargin = px(8)
-            act.layoutParams = ap
-            act.addView(pill("لصق التالي", color, true) { pasteNext(members) })
-            act.addView(pill("تسمية", color, false) {
-                openNameDialog(GroupNameActivity.MODE_RENAME, id, explicit)
-            })
-            act.addView(pill("فك", color, false) { HistoryRepository.ungroup(id) })
-            box.addView(act)
+        if (collapsed) {
+            // مطوية: أول سطرين + "+N"
+            for (mem in members.take(2)) box.addView(previewLine(mem, color))
+            if (members.size > 2) {
+                val more = TextView(ctx)
+                more.text = "+${members.size - 2} أخرى"
+                more.textSize = 11f
+                more.setTextColor(color)
+                more.setPadding(px(6), px(2), px(6), px(4))
+                box.addView(more)
+            }
+        }
 
+        val act = newActionsRow()
+        val ap = act.layoutParams as LinearLayout.LayoutParams
+        ap.topMargin = px(6)
+        ap.bottomMargin = px(8)
+        act.layoutParams = ap
+        act.addView(pill("لصق التالي", color, true) { pasteNext(members) })
+        act.addView(pill("تسمية", color, false) {
+            openNameDialog(GroupNameActivity.MODE_RENAME, id, explicit)
+        })
+        act.addView(pill("فك", color, false) { HistoryRepository.ungroup(id) })
+        box.addView(act)
+
+        if (!collapsed) {
             for ((i, mem) in members.withIndex()) {
                 box.addView(buildItem(mem, i, true))
             }
         }
+
+        // الإفلات على المجموعة نفسها بيضم الكارت ليها
+        attachInternalDrop(box, members.first())
         return box
     }
 }
