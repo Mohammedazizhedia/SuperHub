@@ -15,6 +15,11 @@ class SuperHubTileService : TileService() {
         var live: SuperHubTileService? = null
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        ShelfSettings.init(this)
+    }
+
     override fun onTileAdded() {
         super.onTileAdded()
         refresh()
@@ -28,8 +33,12 @@ class SuperHubTileService : TileService() {
     }
 
     override fun onStopListening() {
-        live = null
         super.onStopListening()
+    }
+
+    override fun onDestroy() {
+        live = null
+        super.onDestroy()
     }
 
     override fun onClick() {
@@ -45,13 +54,17 @@ class SuperHubTileService : TileService() {
     }
 
     fun refresh() {
-        setTile(ClipboardAccessibilityService.instance?.shelfShown == true)
+        try {
+            setTile(ClipboardAccessibilityService.instance?.shelfShown == true)
+        } catch (e: Exception) {
+        }
     }
 
     private fun setTile(on: Boolean) {
-        qsTile?.apply {
-            state = if (on) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-            updateTile()
-        }
+        val t = qsTile ?: return
+        val ic = IconOptions.tileIcon(this)
+        if (ic != null) t.icon = ic
+        t.state = if (on) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+        t.updateTile()
     }
 }
