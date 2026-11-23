@@ -3,6 +3,7 @@ package com.bfbai.superhub.utils
 
 import android.content.Context
 import com.bfbai.superhub.service.ShelfItem
+import com.bfbai.superhub.service.ShelfSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,8 +46,7 @@ object HistoryRepository {
     @Volatile
     var ignoreClipUntil: Long = 0L
 
-    // آخر نص/صورة المستخدم مسحهم: الالتقاط السلبي (زي لمسة المقبض) بيتجاهلهم
-    // لحد ما تنسخ حاجة جديدة أو تنسخ نفس العنصر بنفسك
+    // آخر نص/صورة المستخدم مسحهم: الالتقاط السلبي بيتجاهلهم لحد ما تنسخ حاجة جديدة
     @Volatile
     var dismissedText: String? = null
 
@@ -98,7 +98,7 @@ object HistoryRepository {
     fun init(context: Context) {
         if (started) return
         started = true
-        ShelfBehavior.init(context)
+        ShelfSettings.init(context)
         PrivacyPolicy.init(context)
         val manager = HistoryManager(context.applicationContext)
         val days = PrivacyPolicy.autoWipeDays()
@@ -259,7 +259,7 @@ object HistoryRepository {
         }
     }
 
-    // علامة "اتلصق": ما بتغيّرش الترتيب
+    // علامة "اتلصق/اتنسخت": ما بتغيّرش الترتيب
     fun markPasted(item: ShelfItem, pasted: Boolean) {
         val t = if (pasted) System.currentTimeMillis() else 0L
         _items.update { list ->
@@ -306,7 +306,6 @@ object HistoryRepository {
 
     // ---------- المجموعات ----------
 
-    // بيجمّع العناصر المختارة في مجموعة واحدة جديدة، وبيرجّع رقمها
     fun createGroup(targets: List<ShelfItem>, name: String?): String {
         val id = newGroupId()
         val nm = name?.trim()?.takeIf { it.isNotEmpty() }
@@ -318,6 +317,26 @@ object HistoryRepository {
             )
         }
         return id
+    }
+
+    // السحب داخل الرف: ضم كارت لكارت (أو لمجموعته)
+    fun dropOn(src: ShelfItem, target: ShelfItem) {
+        if (same(src, target)) return
+        _items.update { list ->
+            val cur = list.firstOrNull { same(it, src) } ?: return@update list
+            val tgt = list.firstOrNull { same(it, target) } ?: return@update list
+            val gid = tgt.groupId ?: newGroupId()
+            val name = tgt.groupName
+            normalize(
+                list.map { i ->
+                    when {
+                        same(i, cur) -> i.copy(groupId = gid, groupName = name)
+                        same(i, tgt) && tgt.groupId == null -> i.copy(groupId = gid, groupName = null)
+                        else -> i
+                    }
+                }
+            )
+        }
     }
 
     fun removeFromGroup(targets: List<ShelfItem>) {
