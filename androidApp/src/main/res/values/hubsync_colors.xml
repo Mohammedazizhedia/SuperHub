@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="hubsync_hub_blue_bg">#FF0D47A1</color>
+    <color name="hubsync_hub_aurora_bg">#FF12082B</color>
+    <color name="hubsync_hub_clip_bg">#FF0F766E</color>
+</resources>
