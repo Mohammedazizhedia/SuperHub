@@ -39,6 +39,70 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Built with BFB.AI: شاشة الإعدادات (هي الشاشة الرئيسية، وبتفتح بالضغطة المطولة على الـ Tile) -->
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="true"
+            android:label="HubSync"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
+        </activity>
+
+        <!-- Built with BFB.AI: أيقونات التطبيق البديلة (واحدة بس شغالة، والإعدادات بتبدّل) -->
+        <activity-alias
+            android:name=".AliasShelf"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_hubsync"
+            android:label="HubSync"
+            android:targetActivity=".ui.SettingsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasHub"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_hub_blue"
+            android:label="HubSync"
+            android:targetActivity=".ui.SettingsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasAurora"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_hub_aurora"
+            android:label="HubSync"
+            android:targetActivity=".ui.SettingsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".AliasClip"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_hub_clip"
+            android:label="HubSync"
+            android:targetActivity=".ui.SettingsActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- Built with BFB.AI: تسمية المجموعات (شاشة صغيرة) -->
         <activity
             android:name=".ui.GroupNameActivity"
