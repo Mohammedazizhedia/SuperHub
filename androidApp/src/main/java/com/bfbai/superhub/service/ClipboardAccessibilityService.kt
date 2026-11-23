@@ -23,15 +23,21 @@ import android.widget.Toast
 import com.bfbai.superhub.utils.HistoryRepository
 import com.bfbai.superhub.utils.ImageStore
 import com.bfbai.superhub.utils.PrivacyPolicy
+import com.bfbai.superhub.utils.ShelfBehavior
+
+private class CaptureReq(
+    val manual: Boolean,
+    val passive: Boolean,
+    val expectChange: Boolean,
+    val acceptUnchanged: Boolean,
+    val maxAttempts: Int
+)
 
 class ClipboardAccessibilityService : AccessibilityService() {
 
     companion object {
         @Volatile
         var instance: ClipboardAccessibilityService? = null
-
-        // رسائل التشخيص المؤقتة: خليها false بعد ما نتأكد إن كله شغال
-        private const val DEBUG = true
 
         // مدة اعتبار ضغطة النسخ مصدراً للنص (ملي ثانية)
         private const val TRIGGER_WINDOW = 2500L
@@ -50,8 +56,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private var triggerAt: Long = 0L
     private var ignoreClipUntil: Long = 0L
 
+    // الالتقاط بطابور: لو جه طلب والتالي شغال، بنحفظ آخر طلب وبننفذه بعد ما الحالي يخلص
     private var captureBusy: Boolean = false
     private var captureToken: Int = 0
+    private var pending: CaptureReq? = null
+
     private var lastCaptured: String? = null
     private var lastImageHash: String? = null
     private var lastImageAt: Long = 0L
@@ -90,14 +99,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     // التقاط يدوي للحافظة (ممكن يتنادى من أي زرار أو إشعار)
     fun pasteFromShelf() {
-        requestCapture(
-            manual = true, passive = true,
-            expectChange = false, acceptUnchanged = true, maxAttempts = 2
-        )
+        requestCapture(manual = true, passive = true, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
     }
 
     private fun dbg(msg: String) {
-        if (DEBUG) Toast.makeText(this, "HubSync: $msg", Toast.LENGTH_SHORT).show()
+        if (ShelfStyle.debug) Toast.makeText(this, "HubSync: $msg", Toast.LENGTH_SHORT).show()
     }
 
     // ---------- تمييز التطبيقات ----------
@@ -135,7 +141,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         triggerAt = SystemClock.uptimeMillis()
     }
 
-    // مصدر النسخ (الحزمة): التطبيق اللي حصلت فيه ضغطة النسخ (لو لسه جديدة)،
+    // مصدر النسخ: التطبيق اللي حصلت فيه ضغطة النسخ (لو لسه جديدة)،
     // وإلا التطبيق اللي قدامك دلوقتي، وإلا آخر تطبيق حقيقي كنت فيه (مش اللانشر)
     private fun sourcePackage(): String? {
         val t = triggerPkg
@@ -163,6 +169,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         instance = this
         Log.d("ClipboardService", "Service Connected")
 
+        ShelfSettings.init(this)
         PrivacyPolicy.init(this)
         HistoryRepository.init(this)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -179,10 +186,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
             }
             // لما تدوس على مقبض الرف: نقرا الحافظة (المسار اليدوي المضمون)
             shelf?.onOpenedByUser = {
-                requestCapture(
-                    manual = true, passive = true,
-                    expectChange = false, acceptUnchanged = true, maxAttempts = 2
-                )
+                requestCapture(manual = true, passive = true, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
             }
             shelf?.show()
         }
@@ -203,10 +207,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                 return@OnPrimaryClipChangedListener
             }
             if (!readDirect()) {
-                requestCapture(
-                    manual = false, passive = false,
-                    expectChange = false, acceptUnchanged = true, maxAttempts = 2
-                )
+                requestCapture(manual = false, passive = false, expectChange = false, acceptUnchanged = true, maxAttempts = 2)
             }
         }
         clipListener = l
@@ -219,7 +220,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
             val clip = clipboardManager.primaryClip
             if (clip != null && clip.itemCount > 0) {
                 val d = clip.description
-                val sensitive = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                val sensitive = ShelfBehavior.ignoreSensitive &&
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
                     d?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
                 if (sensitive) {
                     dbg("محتوى حساس، اتجاهلته")
@@ -231,10 +233,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     // لو القراءة فشلت أو طلعت نفس الصورة القديمة، نجرب بالتركيز
                     acceptImage(uri, passive = false, manual = false) { sameOrFail ->
                         if (sameOrFail) {
-                            requestCapture(
-                                manual = false, passive = false,
-                                expectChange = true, acceptUnchanged = true, maxAttempts = 2
-                            )
+                            requestCapture(manual = false, passive = false, expectChange = true, acceptUnchanged = true, maxAttempts = 2)
                         }
                     }
                     return true
@@ -324,11 +323,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
         }.start()
     }
 
-    /**
-     * الالتقاط بالتركيز.
-     * expectChange: لو الحافظة لسه فيها النص (أو الصورة) القديم، نستنى ونقرا تاني.
-     * acceptUnchanged: لو النص فضل زي ما هو بعد كل المحاولات، نسجله برضه (نسخ متكرر مقصود)
-     */
+    // ---------- الالتقاط بالتركيز (بطابور) ----------
+
     private fun requestCapture(
         manual: Boolean,
         passive: Boolean,
@@ -336,78 +332,80 @@ class ClipboardAccessibilityService : AccessibilityService() {
         acceptUnchanged: Boolean,
         maxAttempts: Int
     ) {
-        if (captureBusy) return
+        if (!manual && !ShelfBehavior.autoCapture) {
+            dbg("الالتقاط التلقائي مقفول من الإعدادات")
+            return
+        }
         // بلاش نسرق التركيز (ورمشة الشاشة) لو الالتقاط أصلاً ممنوع
         if (!manual && !PrivacyPolicy.allowsCapture(sourcePackage())) {
             dbg("الالتقاط متوقف (وضع خاص أو تطبيق مستثنى)")
             return
         }
+        val req = CaptureReq(manual, passive, expectChange, acceptUnchanged, maxAttempts)
+        if (captureBusy) {
+            // الطلب اليدوي ما بيتبدلش بطلب تلقائي
+            val p = pending
+            if (p == null || !p.manual || manual) pending = req
+            return
+        }
+        startCapture(req)
+    }
+
+    private fun startCapture(req: CaptureReq) {
         val s = shelf ?: return
         captureBusy = true
         val token = ++captureToken
         // أمان: لو حصل أي حاجة غريبة نفك القفل بعد 8 ثواني
-        handler.postDelayed({ if (captureToken == token) captureBusy = false }, 8000)
-        captureLoop(s, 0, lastCaptured, manual, passive, expectChange, acceptUnchanged, maxAttempts)
+        handler.postDelayed({ if (captureToken == token && captureBusy) finishCapture() }, 8000)
+        captureLoop(s, 0, lastCaptured, req)
     }
 
-    private fun captureLoop(
-        s: ShelfController,
-        attempt: Int,
-        baseline: String?,
-        manual: Boolean,
-        passive: Boolean,
-        expectChange: Boolean,
-        acceptUnchanged: Boolean,
-        maxAttempts: Int
-    ) {
+    private fun finishCapture() {
+        captureBusy = false
+        val p = pending
+        pending = null
+        if (p != null) {
+            handler.postDelayed({
+                if (!captureBusy) {
+                    if (p.manual || PrivacyPolicy.allowsCapture(sourcePackage())) startCapture(p)
+                }
+            }, 80)
+        }
+    }
+
+    private fun captureLoop(s: ShelfController, attempt: Int, baseline: String?, req: CaptureReq) {
         s.captureClipboard { text, uri, skipped ->
             if (uri != null) {
-                acceptImage(uri, passive, manual) { sameOrFail ->
-                    if (sameOrFail && expectChange && attempt < maxAttempts) {
-                        handler.postDelayed(
-                            {
-                                captureLoop(
-                                    s, attempt + 1, baseline, manual, passive,
-                                    expectChange, acceptUnchanged, maxAttempts
-                                )
-                            },
-                            350
-                        )
+                acceptImage(uri, req.passive, req.manual) { sameOrFail ->
+                    if (sameOrFail && req.expectChange && attempt < req.maxAttempts) {
+                        handler.postDelayed({ captureLoop(s, attempt + 1, baseline, req) }, 250)
                     } else {
-                        captureBusy = false
+                        finishCapture()
                     }
                 }
                 return@captureClipboard
             }
             if (skipped) {
-                captureBusy = false
+                finishCapture()
                 dbg("اتجاهلته (حساس أو مش نص ولا صورة)")
                 return@captureClipboard
             }
             val t = text
             val empty = t.isNullOrBlank()
-            val unchanged = expectChange && !empty && t == baseline
-            if ((empty || unchanged) && attempt < maxAttempts) {
-                handler.postDelayed(
-                    {
-                        captureLoop(
-                            s, attempt + 1, baseline, manual, passive,
-                            expectChange, acceptUnchanged, maxAttempts
-                        )
-                    },
-                    350
-                )
+            val unchanged = req.expectChange && !empty && t == baseline
+            if ((empty || unchanged) && attempt < req.maxAttempts) {
+                handler.postDelayed({ captureLoop(s, attempt + 1, baseline, req) }, 250)
             } else {
-                captureBusy = false
+                finishCapture()
                 if (t.isNullOrBlank()) {
                     dbg("الحافظة فاضية أو النظام منع القراءة")
-                    if (manual) {
+                    if (req.manual) {
                         Toast.makeText(this, "الحافظة فاضية أو النظام منع القراءة", Toast.LENGTH_SHORT).show()
                     }
-                } else if (unchanged && !acceptUnchanged) {
+                } else if (unchanged && !req.acceptUnchanged) {
                     dbg("مفيش نسخ جديد")
                 } else {
-                    acceptText(t, passive, manual)
+                    acceptText(t, req.passive, req.manual)
                 }
             }
         }
@@ -431,10 +429,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     markTrigger(sp)
                     dbg("خرجت من ${labelFor(sp)} بعد تحديد نص، بفحص الحافظة")
                     handler.postDelayed({
-                        requestCapture(
-                            manual = false, passive = true,
-                            expectChange = true, acceptUnchanged = false, maxAttempts = 1
-                        )
+                        requestCapture(manual = false, passive = true, expectChange = true, acceptUnchanged = false, maxAttempts = 1)
                     }, 500)
                 }
             }
@@ -446,11 +441,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
                     dbg("ضغطة نسخ في ${labelFor(pkg)}")
                     // التطبيق محتاج لحظة يحط النص في الحافظة قبل ما نقراه
                     handler.postDelayed({
-                        requestCapture(
-                            manual = false, passive = false,
-                            expectChange = true, acceptUnchanged = true, maxAttempts = 3
-                        )
-                    }, 150)
+                        requestCapture(manual = false, passive = false, expectChange = true, acceptUnchanged = true, maxAttempts = 3)
+                    }, 120)
                 }
             }
 
@@ -506,7 +498,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
             return false
         }
         ignoreClipUntil = System.currentTimeMillis() + 1000
-        // الحافظة هتبقى فيها النص ده، فنعتبره "اتلقط" ومنلصقه عشان ما يترجعش يتحرك من مكانه
+        // الحافظة هتبقى فيها النص ده، فنعتبره "اتلقط" وما نحركهوش من مكانه
         lastCaptured = text
         lastInsertedText = text
         clipboardManager.setPrimaryClip(ClipData.newPlainText("shelf", text))
