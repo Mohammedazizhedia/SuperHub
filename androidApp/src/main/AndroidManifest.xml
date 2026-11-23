@@ -2,10 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <!-- قراءة الصور المسحوبة من المعرض -->
@@ -28,7 +24,6 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
 
-        <!-- Built with BFB.AI: مزود الملفات (مشاركة ونسخ الصور) -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -39,7 +34,7 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Built with BFB.AI: شاشة الإعدادات (هي الشاشة الرئيسية، وبتفتح بالضغطة المطولة على الـ Tile) -->
+        <!-- شاشة الإعدادات (الشاشة الرئيسية، وبتفتح بالضغطة المطولة على الـ Tile) -->
         <activity
             android:name=".ui.SettingsActivity"
             android:exported="true"
@@ -50,7 +45,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Built with BFB.AI: أيقونات التطبيق البديلة (واحدة بس شغالة، والإعدادات بتبدّل) -->
+        <!-- أيقونات التطبيق البديلة (واحدة بس شغالة، والإعدادات بتبدّل) -->
         <activity-alias
             android:name=".AliasShelf"
             android:enabled="true"
@@ -103,27 +98,23 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- Built with BFB.AI: تسمية المجموعات (شاشة صغيرة) -->
         <activity
             android:name=".ui.GroupNameActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.DeviceDefault.Dialog" />
 
-        <!-- Built with BFB.AI: طلب صلاحية الصور (شفافة وبتقفل لوحدها) -->
         <activity
             android:name=".ui.MediaPermissionActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-        <!-- Built with BFB.AI: شاشة السجل -->
         <activity
             android:name=".ui.HistoryActivity"
             android:exported="false"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
-        <!-- Built with BFB.AI: نشاط استقبال المشاركات (نصوص وصور) -->
         <activity
             android:name=".ui.ShareReceiverActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
@@ -143,7 +134,6 @@
             </intent-filter>
         </activity>
 
-        <!-- خدمة الالتقاط والرف -->
         <service
             android:name=".service.ClipboardAccessibilityService"
             android:exported="true"
@@ -156,7 +146,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- زرار الكونترول بانل: الرف -->
         <service
             android:name=".service.SuperHubTileService"
             android:exported="true"
@@ -168,7 +157,6 @@
             </intent-filter>
         </service>
 
-        <!-- زرار الكونترول بانل: الوضع الخاص -->
         <service
             android:name=".service.PrivateModeTileService"
             android:exported="true"
@@ -180,7 +168,6 @@
             </intent-filter>
         </service>
 
-        <!-- الـ Activity دي عشان واتساب والفيسبوك (Process Text) -->
         <activity
             android:name=".ProcessTextActivity"
             android:exported="true"
