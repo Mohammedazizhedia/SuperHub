@@ -24,13 +24,14 @@ object HistoryRepository {
 
     private const val MAX_TEXT_LENGTH = 100_000
 
-    // مجموعة يدوية شغالة: أي نسخ جديد بيدخلها لحد ما تتقفل
     data class ManualGroup(val id: String, val name: String?)
+    data class UndoInfo(val id: Long, val count: Int)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _items = MutableStateFlow<List<ShelfItem>>(emptyList())
     private val _loaded = MutableStateFlow(false)
     private val _manual = MutableStateFlow<ManualGroup?>(null)
+    private val _undo = MutableStateFlow<UndoInfo?>(null)
     private var started = false
     private var lastTs = 0L
     private var groupSeq = 0L
@@ -38,22 +39,64 @@ object HistoryRepository {
     @Volatile
     private var manualLastAt = 0L
 
+    @Volatile
+    private var undoBuf: List<ShelfItem> = emptyList()
+
     val items: StateFlow<List<ShelfItem>> = _items.asStateFlow()
     val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
     val manualGroup: StateFlow<ManualGroup?> = _manual.asStateFlow()
+    val undo: StateFlow<UndoInfo?> = _undo.asStateFlow()
 
     // لتجاهل صدى النسخ اللي بنعمله إحنا (مثلاً نسخ من السجل)
     @Volatile
     var ignoreClipUntil: Long = 0L
 
-    // آخر نص/صورة المستخدم مسحهم: الالتقاط السلبي بيتجاهلهم لحد ما تنسخ حاجة جديدة
-    @Volatile
-    var dismissedText: String? = null
+    // آخر 64 نص و64 صورة المستخدم مسحهم: الالتقاط السلبي بيتجاهلهم
+    private val dismissedTexts = ArrayDeque<String>()
+    private val dismissedImages = ArrayDeque<String>()
 
-    @Volatile
-    var dismissedImageHash: String? = null
+    private fun rememberDismissed(t: String) {
+        synchronized(dismissedTexts) {
+            dismissedTexts.remove(t)
+            dismissedTexts.addLast(t)
+            while (dismissedTexts.size > 64) dismissedTexts.removeFirst()
+        }
+    }
 
-    // اسم ملف كود: كلمة بامتداد معروف (kt, xml, json...)
+    private fun rememberDismissedImage(h: String) {
+        synchronized(dismissedImages) {
+            dismissedImages.remove(h)
+            dismissedImages.addLast(h)
+            while (dismissedImages.size > 64) dismissedImages.removeFirst()
+        }
+    }
+
+    fun isDismissed(text: String): Boolean = synchronized(dismissedTexts) { dismissedTexts.contains(text) }
+
+    fun isDismissedImage(hash: String?): Boolean =
+        hash != null && synchronized(dismissedImages) { dismissedImages.contains(hash) }
+
+    fun forgetDismissed(text: String) {
+        synchronized(dismissedTexts) { dismissedTexts.remove(text) }
+    }
+
+    fun forgetDismissedImage(hash: String) {
+        synchronized(dismissedImages) { dismissedImages.remove(hash) }
+    }
+
+    // للتوافق مع الكود القديم
+    var dismissedText: String?
+        get() = synchronized(dismissedTexts) { dismissedTexts.lastOrNull() }
+        set(v) {
+            if (v == null) synchronized(dismissedTexts) { dismissedTexts.clear() } else rememberDismissed(v)
+        }
+
+    var dismissedImageHash: String?
+        get() = synchronized(dismissedImages) { dismissedImages.lastOrNull() }
+        set(v) {
+            if (v == null) synchronized(dismissedImages) { dismissedImages.clear() } else rememberDismissedImage(v)
+        }
+
     private val fileRe = Regex(
         """^[\w@\-./\\]*[\w\-]+\.(kt|kts|java|xml|json|gradle|md|txt|py|js|ts|tsx|jsx|html|css|yml|yaml|properties|sh|cpp|c|h|swift|dart|php|sql|toml|cfg)$""",
         RegexOption.IGNORE_CASE
@@ -68,7 +111,6 @@ object HistoryRepository {
 
     private fun isFileLike(text: String): Boolean = fileNameOf(text) != null
 
-    // النص التالف (صورة اتقرت كنص) أو الضخم جداً بيعلّق الشاشة، فبنرفضه
     fun isGarbage(text: String): Boolean {
         if (text.length > MAX_TEXT_LENGTH) return true
         val n = minOf(text.length, 2000)
@@ -108,7 +150,6 @@ object HistoryRepository {
                 .filterNot { isGarbage(it.text) }
                 .filter { it.imagePath == null || File(it.imagePath).exists() }
 
-            // المسح التلقائي للأقدم (لو مفعّل في الخصوصية): المثبّت بيفضل
             val kept = if (cutoff > 0L) {
                 val old = all.filter { !it.isPinned && it.timestamp < cutoff }
                 for (o in old) {
@@ -121,7 +162,6 @@ object HistoryRepository {
             }
             val saved = normalize(kept)
 
-            // أي حاجة اتضافت قبل ما التحميل يخلص بتتقدم، والمحفوظ القديم بيتحط بعدها
             _items.update { current ->
                 val known = current.map { it.text + "|" + it.timestamp }.toSet()
                 current + saved.filter { (it.text + "|" + it.timestamp) !in known }
@@ -136,6 +176,15 @@ object HistoryRepository {
 
     private fun same(a: ShelfItem, b: ShelfItem): Boolean =
         a.text == b.text && a.timestamp == b.timestamp
+
+    private fun keyOf(i: ShelfItem): String =
+        i.timestamp.toString() + "|" + (i.imagePath ?: i.text.hashCode().toString())
+
+    private fun sameApp(a: ShelfItem, b: ShelfItem): Boolean {
+        val pa = a.sourcePkg
+        val pb = b.sourcePkg
+        return if (pa != null && pb != null) pa == pb else a.source == b.source
+    }
 
     // أي مجموعة فيها أقل من عنصرين بتتفك (إلا المجموعة اليدوية الشغالة)
     private fun normalize(list: List<ShelfItem>): List<ShelfItem> {
@@ -158,7 +207,6 @@ object HistoryRepository {
         return if (changed) out else list
     }
 
-    // بيحط العنصر الجديد فوق، وبيقرر هل يدخل مجموعة (يدوية أو تلقائية)
     private fun placeNew(list: List<ShelfItem>, item: ShelfItem): List<ShelfItem> {
         val manual = _manual.value
         if (manual != null) {
@@ -174,7 +222,7 @@ object HistoryRepository {
         if (!ShelfBehavior.autoGroup) return listOf(item) + list
         val last = list.firstOrNull() ?: return listOf(item)
 
-        if (ShelfBehavior.groupSameApp && last.source != item.source) return listOf(item) + list
+        if (ShelfBehavior.groupSameApp && !sameApp(last, item)) return listOf(item) + list
 
         var window = ShelfBehavior.groupWindowSec * 1000L
         if (ShelfBehavior.groupCodeFile) {
@@ -195,7 +243,7 @@ object HistoryRepository {
         return listOf(joined) + rest
     }
 
-    fun add(text: String, source: String) {
+    fun add(text: String, source: String, pkg: String? = null) {
         val t = text.trim()
         if (t.isEmpty() || isGarbage(t)) return
         _items.update { list ->
@@ -205,14 +253,14 @@ object HistoryRepository {
                 text = t,
                 source = source,
                 timestamp = nextTs(),
-                isPinned = old?.isPinned ?: false
+                isPinned = old?.isPinned ?: false,
+                sourcePkg = pkg
             )
             normalize(placeNew(rest, item))
         }
     }
 
-    // لو نفس الصورة (بنفس المحتوى) موجودة، بنطلّعها لفوق ونمسح النسخة الجديدة بدل ما نكررها
-    fun addImage(path: String, source: String) {
+    fun addImage(path: String, source: String, pkg: String? = null) {
         scope.launch {
             val h = ImageStore.hashOf(path)
             val existing = if (h != null) {
@@ -239,7 +287,8 @@ object HistoryRepository {
                         source = source,
                         timestamp = nextTs(),
                         imagePath = path,
-                        imageHash = h
+                        imageHash = h,
+                        sourcePkg = pkg
                     )
                     normalize(placeNew(list, item))
                 }
@@ -267,41 +316,74 @@ object HistoryRepository {
         }
     }
 
+    // ---------- الحذف مع التراجع ----------
+
+    // بنحتفظ بالمحذوف 20 ثانية (وملفات الصور ما بتتمسحش قبلها)
+    private fun stash(removed: List<ShelfItem>) {
+        if (removed.isEmpty()) return
+        undoBuf = removed
+        _undo.value = UndoInfo(nextTs(), removed.size)
+        for (r in removed) {
+            if (r.imagePath == null) rememberDismissed(r.text) else r.imageHash?.let { rememberDismissedImage(it) }
+        }
+        val imgs = removed.mapNotNull { it.imagePath }
+        if (imgs.isNotEmpty()) {
+            scope.launch {
+                delay(20_000)
+                val keep = _items.value.mapNotNull { it.imagePath }.toSet()
+                for (p in imgs) if (p !in keep) ImageStore.delete(p)
+            }
+        }
+    }
+
+    fun undo() {
+        val back = undoBuf
+        if (back.isEmpty()) return
+        undoBuf = emptyList()
+        _undo.value = null
+        for (b in back) {
+            if (b.imagePath == null) forgetDismissed(b.text) else b.imageHash?.let { forgetDismissedImage(it) }
+        }
+        _items.update { list ->
+            val have = list.map { keyOf(it) }.toSet()
+            val merged = list + back.filter { keyOf(it) !in have }
+            normalize(merged.sortedByDescending { it.timestamp })
+        }
+    }
+
     fun remove(item: ShelfItem) {
-        if (item.imagePath == null) dismissedText = item.text else dismissedImageHash = item.imageHash
-        _items.update { list -> normalize(list.filterNot { same(it, item) }) }
-        val p = item.imagePath
-        if (p != null) scope.launch { ImageStore.delete(p) }
+        var gone = false
+        _items.update { list ->
+            val n = list.filterNot { same(it, item) }
+            gone = n.size != list.size
+            normalize(n)
+        }
+        if (gone) stash(listOf(item))
+    }
+
+    fun removeMany(targets: List<ShelfItem>) {
+        if (targets.isEmpty()) return
+        val gone = _items.value.filter { i -> targets.any { same(i, it) } }
+        _items.update { list -> normalize(list.filterNot { i -> targets.any { same(i, it) } }) }
+        stash(gone)
     }
 
     fun clearUnpinned() {
-        val gone = _items.value.filter { !it.isPinned }
-        val firstText = gone.firstOrNull { it.imagePath == null }
-        val firstImage = gone.firstOrNull { it.imagePath != null }
-        if (firstText != null) dismissedText = firstText.text
-        if (firstImage != null) dismissedImageHash = firstImage.imageHash
-        _items.update { list -> normalize(list.filter { it.isPinned }) }
-        scope.launch {
-            for (g in gone) {
-                val p = g.imagePath
-                if (p != null) ImageStore.delete(p)
-            }
-        }
+        removeMany(_items.value.filter { !it.isPinned })
     }
 
-    // مسح الأقدم من عدد أيام معيّن (المثبّت بيفضل)
+    fun clearPasted() {
+        removeMany(_items.value.filter { !it.isPinned && it.pastedAt > 0L })
+    }
+
+    fun clearImages() {
+        removeMany(_items.value.filter { !it.isPinned && it.imagePath != null })
+    }
+
     fun cleanOlderThan(days: Int) {
         if (days <= 0) return
         val cutoff = System.currentTimeMillis() - days * 86_400_000L
-        val gone = _items.value.filter { !it.isPinned && it.timestamp < cutoff }
-        if (gone.isEmpty()) return
-        _items.update { list -> normalize(list.filter { it.isPinned || it.timestamp >= cutoff }) }
-        scope.launch {
-            for (g in gone) {
-                val p = g.imagePath
-                if (p != null) ImageStore.delete(p)
-            }
-        }
+        removeMany(_items.value.filter { !it.isPinned && it.timestamp < cutoff })
     }
 
     // ---------- المجموعات ----------
@@ -316,6 +398,7 @@ object HistoryRepository {
                 }
             )
         }
+        DiagLog.d("repo", "createGroup id=$id targets=${targets.size}")
         return id
     }
 
@@ -360,20 +443,13 @@ object HistoryRepository {
     fun removeGroup(groupId: String) {
         if (_manual.value?.id == groupId) _manual.value = null
         val gone = _items.value.filter { it.groupId == groupId && !it.isPinned }
-        val firstText = gone.firstOrNull { it.imagePath == null }
-        if (firstText != null) dismissedText = firstText.text
         _items.update { list ->
             normalize(
                 list.filterNot { it.groupId == groupId && !it.isPinned }
                     .map { if (it.groupId == groupId) it.copy(groupId = null, groupName = null) else it }
             )
         }
-        scope.launch {
-            for (g in gone) {
-                val p = g.imagePath
-                if (p != null) ImageStore.delete(p)
-            }
-        }
+        stash(gone)
     }
 
     fun setGroupName(groupId: String, name: String?) {
