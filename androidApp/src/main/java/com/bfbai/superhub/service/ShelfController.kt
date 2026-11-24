@@ -16,6 +16,7 @@ import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -24,6 +25,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.TextUtils
 import android.view.DragEvent
 import android.view.Gravity
 import android.view.MotionEvent
@@ -34,6 +36,7 @@ import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.view.animation.AccelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -43,12 +46,14 @@ import com.bfbai.superhub.ui.GroupNameActivity
 import com.bfbai.superhub.ui.HistoryActivity
 import com.bfbai.superhub.ui.SettingsActivity
 import com.bfbai.superhub.utils.Detection
+import com.bfbai.superhub.utils.DiagLog
 import com.bfbai.superhub.utils.HistoryRepository
 import com.bfbai.superhub.utils.ImageStore
 import com.bfbai.superhub.utils.ItemKind
 import com.bfbai.superhub.utils.PrivacyPolicy
 import com.bfbai.superhub.utils.ShelfBehavior
 import com.bfbai.superhub.utils.SmartDetector
+import com.bfbai.superhub.utils.SourceIcons
 import com.bfbai.superhub.utils.Thumbs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -71,8 +76,12 @@ data class ShelfItem(
     val imageHash: String? = null,
     val groupId: String? = null,
     val groupName: String? = null,
-    val pastedAt: Long = 0L
+    val pastedAt: Long = 0L,
+    val sourcePkg: String? = null
 )
+
+/** نتيجة قراءة الحافظة: النص أو الصورة، وهل اتجاهلناها، وختم وقت النسخ من النظام */
+class ClipSnap(val text: String?, val uri: Uri?, val skipped: Boolean, val ts: Long)
 
 internal fun withAlpha(color: Int, alpha: Int): Int = (alpha shl 24) or (color and 0x00FFFFFF)
 
@@ -107,7 +116,6 @@ object ShelfStyle {
     var cornerDp: Float = 18f
     var cardCornerDp: Float = 14f
 
-    // شفافية الكروت: 0xFF صلب، 0x59 شفاف نص نص، 0x2E زجاجي جداً
     var cardFillColor: Int = Color.parseColor("#1E3A6D")
     var cardFillAlpha: Int = 0x59
     var cardStrokeColor: Int = Color.parseColor("#4DE1E1")
@@ -119,7 +127,6 @@ object ShelfStyle {
     var neutralColor: Int = Color.parseColor("#B7C7E4")
     var imageColor: Int = Color.parseColor("#FF8FB1")
 
-    // الكارت اللي اتلصق: درجة الخفوت (1 = من غير خفوت)
     var pastedAlpha: Float = 0.5f
 
     var blurEnabled: Boolean = true
@@ -133,27 +140,22 @@ object ShelfStyle {
     var dropZoneWidthDp: Float = 120f
     var dropZoneHeightDp: Float = 240f
 
-    // لما الرف يقرب من حافة بالمسافة دي (dp) بيلتصق بيها
     var snapThresholdDp: Float = 24f
 
     var autoCloseMs: Long = 10_000L
     var otpTtlMs: Long = 60_000L
     var previewChars: Int = 400
 
-    // السحب من برّه بيظهر منطقة الإفلات حتى لو الرف مخفي
     var dragWakesShelf: Boolean = true
 
-    // سحب الحذف: تدرج من أحمر لطيف لأبيض
     var deleteColorStart: Int = Color.parseColor("#F28B82")
     var deleteColorEnd: Int = Color.WHITE
     var swipeThreshold: Float = 0.4f
 
-    // Throw to close: "hide" يخفيه، "collapse" يطويه لشريط
     var throwEnabled: Boolean = true
     var throwAction: String = "hide"
     var throwMinSpeedDp: Float = 1200f
 
-    // رسائل التشخيص الصغيرة (HubSync: ...)
     var debug: Boolean = true
 
     val kindColors: Map<ItemKind, Int> = mapOf(
@@ -235,7 +237,6 @@ object ShelfStyle {
 
 private const val INTERNAL_DRAG = "hubsync-internal-drag"
 
-// حالات الرف: شريط، معاينة، مفتوح، منطقة إفلات
 private enum class Mode { BAR, PEEK, OPEN, DROP }
 
 private sealed class Row {
@@ -324,7 +325,7 @@ private class SwipeLayout(ctx: Context) : FrameLayout(ctx) {
                 tracker?.addMovement(ev)
                 val dx = ev.x - downX
                 val dy = ev.y - downY
-                if (!dragging && abs(dx) > slop * 1.5f && abs(dx) > abs(dy) * 1.4f) {
+                if (!dragging && abs(dx) > slop * 1.2f && abs(dx) > abs(dy) * 1.2f) {
                     dragging = true
                     parent?.requestDisallowInterceptTouchEvent(true)
                 }
@@ -377,6 +378,14 @@ private class SwipeLayout(ctx: Context) : FrameLayout(ctx) {
     }
 }
 
+/** ScrollView بارتفاع أقصى (للقايمة الطويلة) */
+private class MaxHeightScroll(ctx: Context, private val maxPx: Int) : ScrollView(ctx) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val h = MeasureSpec.makeMeasureSpec(maxPx, MeasureSpec.AT_MOST)
+        super.onMeasure(widthMeasureSpec, h)
+    }
+}
+
 @SuppressLint("ClickableViewAccessibility")
 class ShelfController(
     private val ctx: Context,
@@ -390,12 +399,13 @@ class ShelfController(
     private val dp: Float = ctx.resources.displayMetrics.density
     private val handler = Handler(Looper.getMainLooper())
 
-    // نسخة للعرض فقط، المصدر الحقيقي هو HistoryRepository
     private val items: ArrayList<ShelfItem> = ArrayList()
     private val shownItems: ArrayList<ShelfItem> = ArrayList()
     private val otpLabels: ArrayList<Pair<ShelfItem, TextView>> = ArrayList()
     private val detectCache: HashMap<String, Detection> = HashMap()
     private val selected: HashSet<String> = HashSet()
+    private val expandedGroups: HashSet<String> = HashSet()
+    private val collapsedGroups: HashSet<String> = HashSet()
     private var selectMode: Boolean = false
     private var manualInfo: HistoryRepository.ManualGroup? = null
 
@@ -406,8 +416,8 @@ class ShelfController(
     private var added: Boolean = false
     private var userHidden: Boolean = false
     private var dropActive: Boolean = false
+    private var undoShown: Boolean = false
 
-    // مكان الرف: الزاوية العلوية الشمال، وأي حافة ملتصق بيها
     private var posX: Int = 0
     private var posY: Int = 0
     private var snapL: Boolean = false
@@ -419,11 +429,11 @@ class ShelfController(
     private var tracker: VelocityTracker? = null
     private var snapAnim: ValueAnimator? = null
 
-    // الكارت اللي بيتسحب داخل الرف (للضم في مجموعة)
     private var dragSource: ShelfItem? = null
 
     var onShownChanged: ((Boolean) -> Unit)? = null
     var appNameProvider: (() -> String)? = null
+    var pkgProvider: (() -> String?)? = null
     var onOpenedByUser: (() -> Unit)? = null
     val isShown: Boolean get() = added && !userHidden
 
@@ -440,10 +450,13 @@ class ShelfController(
     private val grip: View = View(ctx)
     private val selectBar: LinearLayout = LinearLayout(ctx)
     private val selectCountTv: TextView = TextView(ctx)
+    private val selectScroll: HorizontalScrollView = HorizontalScrollView(ctx)
+    private val selectRow: LinearLayout = LinearLayout(ctx)
+    private val undoBar: LinearLayout = LinearLayout(ctx)
+    private val undoTv: TextView = TextView(ctx)
     private val dropTv: TextView = TextView(ctx)
-    private var customMenu: LinearLayout? = null
-
-    private val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
+    private var customMenu: View? = null
+    private var diagLayer: View? = null
 
     private val lp: WindowManager.LayoutParams = WindowManager.LayoutParams(
         (ShelfStyle.closedWidthDp * dp).toInt(),
@@ -455,15 +468,14 @@ class ShelfController(
         PixelFormat.TRANSLUCENT
     )
 
-    // بيرجّع الرف لشريط بعد المعاينة أو الفتح
     private val collapseRunnable: Runnable = Runnable {
         if (mode == Mode.OPEN || mode == Mode.PEEK) setMode(Mode.BAR)
     }
 
-    // بعد فترة من غير لمس: الرف العايم بيروح لأقرب حافة
     private val driftRunnable: Runnable = Runnable { driftToEdge() }
 
-    // بيحذف أكواد التحقق المنتهية ويحدّث العد التنازلي كل ثانية
+    private val hideUndoRunnable: Runnable = Runnable { hideUndoBar() }
+
     private val ticker: Runnable = object : Runnable {
         override fun run() {
             val now = System.currentTimeMillis()
@@ -479,7 +491,7 @@ class ShelfController(
             for (item in expired) HistoryRepository.remove(item)
             for ((item, tv) in otpLabels) {
                 val left = ((ShelfStyle.otpTtlMs - (now - item.timestamp)) / 1000).coerceAtLeast(0)
-                tv.text = "ينتهي بعد ${left}ث"
+                tv.text = otpText(left)
             }
             if (alive) handler.postDelayed(this, 1000)
         }
@@ -488,6 +500,10 @@ class ShelfController(
     private fun px(v: Int): Int = (v * dp).toInt()
     private fun px(v: Float): Int = (v * dp).toInt()
     private fun sz(v: Float): Float = v * ShelfStyle.textScale
+    private fun toast(m: String) = Toast.makeText(ctx, m, Toast.LENGTH_SHORT).show()
+    private fun otpText(left: Long): String = tr("ينتهي بعد ${left}ث", "expires in ${left}s")
+    private fun fmtTime(ts: Long): String =
+        SimpleDateFormat("hh:mm a", Locale(if (Lang.isAr()) "ar" else "en")).format(Date(ts))
 
     init {
         ShelfBehavior.init(ctx)
@@ -507,8 +523,7 @@ class ShelfController(
             snapR = true
         }
 
-        // المحتوى دايماً من اليمين لليسار على الجانبين، واليمين والشمال متطابقين هندسياً
-        root.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        applyDirection()
 
         // قص المحتوى على زوايا الرف (من غير ركن مربّع)
         root.outlineProvider = object : ViewOutlineProvider() {
@@ -528,9 +543,21 @@ class ShelfController(
         }
         root.clipToOutline = true
 
+        // آخر 200dp من الرف ما يتعارضوش مع إيماءات النظام (الرجوع والهوم)
+        root.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+            if (Build.VERSION.SDK_INT >= 29) {
+                try {
+                    val h = b - t
+                    val w = r - l
+                    v.systemGestureExclusionRects = listOf(Rect(0, maxOf(0, h - px(200)), w, h))
+                } catch (e: Exception) {
+                }
+            }
+        }
+
         val pad = px(10)
         list.orientation = LinearLayout.VERTICAL
-        list.setPadding(pad, pad, pad, pad)
+        list.setPadding(pad, pad, pad, px(64))
 
         scroll.addView(list)
         scroll.isVerticalScrollBarEnabled = false
@@ -540,7 +567,6 @@ class ShelfController(
             false
         }
 
-        // الترويسة: اسم التطبيق + عدد العناصر + زرار القائمة
         topBar.orientation = LinearLayout.HORIZONTAL
         topBar.gravity = Gravity.CENTER_VERTICAL
         topBar.setPadding(px(14), px(6), px(6), 0)
@@ -550,7 +576,6 @@ class ShelfController(
         titleBox.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         titleTv.text = "HubSync"
         titleTv.textSize = 16f
-        titleTv.typeface = ShelfStyle.tf(Typeface.BOLD)
         countTv.textSize = 11f
         titleBox.addView(titleTv)
         titleBox.addView(countTv)
@@ -565,23 +590,25 @@ class ShelfController(
         topBar.addView(titleBox)
         topBar.addView(menuBtn)
 
-        // مقبض صغير بيظهر والرف مطوي
         val gripBg = GradientDrawable()
         gripBg.cornerRadius = 3 * dp
         grip.background = gripBg
 
-        // شريط التحديد (تجميع / إخراج / حذف / إلغاء)
         selectBar.orientation = LinearLayout.HORIZONTAL
         selectBar.gravity = Gravity.CENTER_VERTICAL
         selectBar.setPadding(px(12), px(4), px(8), px(4))
-        selectCountTv.textSize = 12f
-        selectCountTv.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        selectCountTv.textSize = 13f
+        selectCountTv.setPadding(0, 0, px(8), 0)
+        selectScroll.isHorizontalScrollBarEnabled = false
+        selectRow.orientation = LinearLayout.HORIZONTAL
 
-        // منطقة الإفلات
-        dropTv.text = "أفلت\nهنا"
+        undoBar.orientation = LinearLayout.HORIZONTAL
+        undoBar.gravity = Gravity.CENTER_VERTICAL
+        undoBar.setPadding(px(14), px(8), px(8), px(8))
+        undoBar.visibility = View.GONE
+
         dropTv.gravity = Gravity.CENTER
         dropTv.textSize = 15f
-        dropTv.typeface = ShelfStyle.tf(Typeface.BOLD)
 
         root.addView(grip, FrameLayout.LayoutParams(px(3), px(40), Gravity.CENTER))
         root.addView(topBar, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, headerPx))
@@ -602,6 +629,13 @@ class ShelfController(
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
         )
+        val ubp = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM
+        )
+        ubp.setMargins(px(10), 0, px(10), px(10))
+        root.addView(undoBar, ubp)
 
         // الإفلات على مساحة فاضية جوه الرف (للسحب الداخلي) بيطلّع الكارت من مجموعته
         list.setOnDragListener { _, e ->
@@ -612,7 +646,7 @@ class ShelfController(
                     val s = dragSource
                     if (s != null && s.groupId != null) {
                         HistoryRepository.removeFromGroup(listOf(s))
-                        Toast.makeText(ctx, "اتشال من المجموعة", Toast.LENGTH_SHORT).show()
+                        toast(tr("اتشال من المجموعة", "Removed from group"))
                     }
                     true
                 }
@@ -625,7 +659,6 @@ class ShelfController(
             }
         }
 
-        // أي تغيير في المخزن (من الرف أو من شاشة السجل) بيتعرض هنا فوراً
         HistoryRepository.items
             .onEach { all ->
                 items.clear()
@@ -641,7 +674,10 @@ class ShelfController(
             }
             .launchIn(scope)
 
-        // أي تغيير في الإعدادات بيظهر فوراً
+        HistoryRepository.undo
+            .onEach { info -> if (info == null) hideUndoBar() else showUndo(info.count) }
+            .launchIn(scope)
+
         ShelfSettings.changes
             .onEach { onStyleChanged() }
             .launchIn(scope)
@@ -663,18 +699,18 @@ class ShelfController(
                 if (userHidden) return false
 
                 if (event.action == MotionEvent.ACTION_OUTSIDE) {
-                    // لمسة بعد ما الرف يتفتح بلحظة (مثلاً ضغطة نسخ) ما تقفلوش
                     if (SystemClock.uptimeMillis() < ignoreOutsideUntil) return true
                     if (dragSource != null) return true
-                    if (customMenu != null) {
+                    if (customMenu != null || diagLayer != null) {
                         hideCustomMenu()
+                        hideDiag()
                     } else if (mode == Mode.OPEN || mode == Mode.PEEK) {
                         if (!selectMode) setMode(Mode.BAR)
                     }
                     return true
                 }
 
-                if (customMenu != null) return false
+                if (customMenu != null || diagLayer != null) return false
                 if (mode == Mode.DROP) return true
 
                 when (event.action) {
@@ -706,7 +742,6 @@ class ShelfController(
                             if (!dragging) {
                                 dragging = true
                                 handler.removeCallbacks(longPress)
-                                // وهو عايم كل زواياه مستديرة
                                 snapL = false
                                 snapR = false
                                 snapT = false
@@ -731,7 +766,6 @@ class ShelfController(
                         }
 
                         if (dragging) {
-                            // Throw to close: لو سيبت الرف بسرعة عالية يطير ويختفي
                             var thrown = false
                             if (ShelfStyle.throwEnabled) {
                                 val t = tracker
@@ -754,8 +788,8 @@ class ShelfController(
                         } else {
                             releaseTracker()
                             if (mode == Mode.BAR) {
+                                DiagLog.d("shelf", "handle tapped -> open + manual capture")
                                 setMode(Mode.OPEN)
-                                // الضغطة على المقبض = "اقرا الحافظة دلوقتي"
                                 onOpenedByUser?.invoke()
                             } else if (mode == Mode.PEEK) {
                                 setMode(Mode.OPEN)
@@ -776,7 +810,9 @@ class ShelfController(
 
         root.setOnDragListener { _, e -> handleDrag(e) }
 
+        applyTexts()
         buildSelectBar()
+        buildUndoBar()
         updateColors()
         updateTitle()
         applyVisual()
@@ -784,21 +820,42 @@ class ShelfController(
         updateBackground()
     }
 
-    // ---------- الإعدادات ----------
+    // ---------- اللغة والإعدادات ----------
+
+    private fun applyDirection() {
+        root.layoutDirection = if (Lang.isAr()) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
+    }
+
+    private fun applyTexts() {
+        dropTv.text = tr("أفلت\nهنا", "Drop\nhere")
+    }
 
     private fun updateColors() {
         countTv.setTextColor(ShelfStyle.subTextColor)
         countTv.typeface = ShelfStyle.tf(Typeface.NORMAL)
         menuBtn.setTextColor(ShelfStyle.accent)
-        selectCountTv.setTextColor(ShelfStyle.subTextColor)
+        selectCountTv.setTextColor(ShelfStyle.accent)
+        selectCountTv.typeface = ShelfStyle.tf(Typeface.BOLD)
+        undoTv.setTextColor(ShelfStyle.textColor)
+        undoTv.typeface = ShelfStyle.tf(Typeface.NORMAL)
         dropTv.setTextColor(ShelfStyle.accent)
         dropTv.typeface = ShelfStyle.tf(Typeface.BOLD)
         titleTv.typeface = ShelfStyle.tf(Typeface.BOLD)
+        val ubg = GradientDrawable()
+        ubg.cornerRadius = 14 * dp
+        ubg.setColor(ShelfStyle.menuColor)
+        ubg.setStroke(px(1), ShelfStyle.panelStroke)
+        undoBar.background = ubg
     }
 
     private fun onStyleChanged() {
+        hideCustomMenu()
+        hideDiag()
+        applyDirection()
+        applyTexts()
         updateColors()
         buildSelectBar()
+        buildUndoBar()
         updateTitle()
         applyGeometry()
         updateBackground()
@@ -811,11 +868,41 @@ class ShelfController(
 
     private fun buildSelectBar() {
         selectBar.removeAllViews()
+        selectRow.removeAllViews()
+        selectScroll.removeAllViews()
         selectBar.addView(selectCountTv)
-        selectBar.addView(pill("تجميع", ShelfStyle.accent, true) { doGroupSelected() })
-        selectBar.addView(pill("إخراج", ShelfStyle.accent, false) { doUngroupSelected() })
-        selectBar.addView(pill("حذف", ShelfStyle.deleteColorStart, false) { doDeleteSelected() })
-        selectBar.addView(pill("إلغاء", ShelfStyle.subTextColor, false) { exitSelect(true) })
+        selectRow.addView(pill(tr("الكل", "All"), ShelfStyle.accent, false, true) { selectAll() })
+        selectRow.addView(pill(tr("تجميع", "Group"), ShelfStyle.accent, true, true) { doGroupSelected() })
+        selectRow.addView(pill(tr("إخراج", "Ungroup"), ShelfStyle.accent, false, true) { doUngroupSelected() })
+        selectRow.addView(pill(tr("حذف", "Delete"), ShelfStyle.deleteColorStart, false, true) { doDeleteSelected() })
+        selectRow.addView(pill(tr("إلغاء", "Cancel"), ShelfStyle.subTextColor, false, true) { exitSelect(true) })
+        selectScroll.addView(selectRow)
+        selectBar.addView(selectScroll, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+    }
+
+    private fun buildUndoBar() {
+        undoBar.removeAllViews()
+        undoTv.textSize = 13f
+        undoTv.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        undoBar.addView(undoTv)
+        undoBar.addView(pill(tr("تراجع", "Undo"), ShelfStyle.accent, true) {
+            HistoryRepository.undo()
+            hideUndoBar()
+        })
+    }
+
+    private fun showUndo(count: Int) {
+        undoTv.text = tr("اتمسح $count عنصر", "$count item(s) removed")
+        undoShown = true
+        undoBar.visibility = if (mode == Mode.OPEN) View.VISIBLE else View.GONE
+        handler.removeCallbacks(hideUndoRunnable)
+        handler.postDelayed(hideUndoRunnable, 6000)
+    }
+
+    private fun hideUndoBar() {
+        undoShown = false
+        handler.removeCallbacks(hideUndoRunnable)
+        undoBar.visibility = View.GONE
     }
 
     // ---------- الشاشة والهندسة ----------
@@ -823,7 +910,6 @@ class ShelfController(
     private fun screenW(): Int = ctx.resources.displayMetrics.widthPixels
     private fun screenH(): Int = ctx.resources.displayMetrics.heightPixels
 
-    // زوايا الرف: الزاوية اللي على حافة ملتصقة بتتسطّح، والباقي مستدير
     private fun cornerRadii(): FloatArray {
         val r = ShelfStyle.cornerDp * dp
         val tl = if (snapL || snapT) 0f else r
@@ -887,7 +973,6 @@ class ShelfController(
         }
     }
 
-    // لما تسيب الرف بعد التحريك: يلتصق بأقرب حافة (لو قريب) ويفتكر مكانه
     private fun finishDrag(animate: Boolean) {
         val sw = screenW()
         val sh = screenH()
@@ -935,8 +1020,6 @@ class ShelfController(
         a.start()
     }
 
-    // ---------- الانزلاق لأقرب حافة بعد فترة ----------
-
     private fun scheduleDrift() {
         handler.removeCallbacks(driftRunnable)
         if (!ShelfBehavior.idleDrift || mode != Mode.BAR || userHidden || !added) return
@@ -958,8 +1041,6 @@ class ShelfController(
         animateTo(anchorX(lp.width, lp.x), anchorY(lp.height, lp.y))
         ShelfBehavior.savePosition(posX, posY, snapL, snapR, snapT, snapB)
     }
-
-    // ---------- الخلفية ----------
 
     private fun updateBackground() {
         val bg = GradientDrawable()
@@ -987,7 +1068,6 @@ class ShelfController(
         root.invalidateOutline()
     }
 
-    // ضبابية خلف الرف (أندرويد 12 وما فوق، وبس لو الجهاز بيدعمها)
     private fun applyBlur() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         try {
@@ -1002,7 +1082,6 @@ class ShelfController(
         }
     }
 
-    // بيظبط إيه اللي ظاهر في كل حالة
     private fun applyVisual() {
         val open = mode == Mode.OPEN
         topBar.visibility = if (open) View.VISIBLE else View.GONE
@@ -1010,6 +1089,7 @@ class ShelfController(
         scroll.visibility = if (open || mode == Mode.PEEK) View.VISIBLE else View.GONE
         grip.visibility = if (mode == Mode.BAR) View.VISIBLE else View.GONE
         dropTv.visibility = if (mode == Mode.DROP && dropActive) View.VISIBLE else View.GONE
+        undoBar.visibility = if (open && undoShown) View.VISIBLE else View.GONE
 
         val sp = scroll.layoutParams as FrameLayout.LayoutParams
         sp.topMargin = if (open) headerPx + (if (selectMode) selectBarPx else 0) else 0
@@ -1026,6 +1106,8 @@ class ShelfController(
         mode = m
         if (m != Mode.OPEN) {
             hideCustomMenu()
+            hideDiag()
+            expandedGroups.clear()
             if (selectMode) exitSelect(true)
         }
         if (m == Mode.OPEN || m == Mode.PEEK) {
@@ -1043,7 +1125,7 @@ class ShelfController(
 
     private fun resetAutoClose() {
         handler.removeCallbacks(collapseRunnable)
-        if (selectMode || dragSource != null) return
+        if (selectMode || dragSource != null || diagLayer != null) return
         when (mode) {
             Mode.OPEN -> handler.postDelayed(collapseRunnable, ShelfStyle.autoCloseMs)
             Mode.PEEK -> handler.postDelayed(collapseRunnable, ShelfBehavior.peekMs.toLong())
@@ -1053,14 +1135,15 @@ class ShelfController(
     }
 
     private fun dbgToast(msg: String) {
+        DiagLog.d("shelf", msg)
         if (ShelfStyle.debug) Toast.makeText(ctx, "HubSync: $msg", Toast.LENGTH_SHORT).show()
     }
 
-    // ---------- الوضع الخاص: مؤشر في الترويسة وفي لون المقبض ----------
+    // ---------- الوضع الخاص ----------
 
     private fun updateTitle() {
         val priv = PrivacyPolicy.isPrivateMode()
-        titleTv.text = if (priv) "HubSync • وضع خاص" else "HubSync"
+        titleTv.text = if (priv) tr("HubSync • وضع خاص", "HubSync • Private") else "HubSync"
         titleTv.setTextColor(if (priv) PRIVATE_COLOR else ShelfStyle.textColor)
         (grip.background as? GradientDrawable)?.setColor(
             withAlpha(if (priv) PRIVATE_COLOR else ShelfStyle.accent, 0xCC)
@@ -1068,22 +1151,26 @@ class ShelfController(
     }
 
     private fun privateLabel(): String =
-        if (PrivacyPolicy.isPrivateMode()) "إيقاف الوضع الخاص" else "وضع خاص (30 دقيقة)"
+        if (PrivacyPolicy.isPrivateMode()) tr("إيقاف الوضع الخاص", "Stop private mode")
+        else tr("وضع خاص (30 دقيقة)", "Private mode (30 min)")
 
     private fun togglePrivate() {
         if (PrivacyPolicy.isPrivateMode()) {
             PrivacyPolicy.stopPrivate()
-            Toast.makeText(ctx, "الوضع الخاص اتقفل، الالتقاط رجع", Toast.LENGTH_SHORT).show()
+            toast(tr("الوضع الخاص اتقفل، الالتقاط رجع", "Private mode off, capture is back"))
         } else {
             PrivacyPolicy.startPrivate(30)
-            Toast.makeText(ctx, "الوضع الخاص شغال 30 دقيقة: مش هلتقط أي نسخ", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                ctx,
+                tr("الوضع الخاص شغال 30 دقيقة: مش هلتقط أي نسخ", "Private mode for 30 min: nothing is captured"),
+                Toast.LENGTH_LONG
+            ).show()
         }
         updateTitle()
     }
 
     // ---------- Throw to close ----------
 
-    // الإحداثيات الخام (rawX/rawY)، لأن النافذة نفسها بتتحرك مع الإصبع
     private fun track(e: MotionEvent) {
         val t = tracker ?: return
         val c = MotionEvent.obtain(e)
@@ -1128,14 +1215,13 @@ class ShelfController(
                     setMode(Mode.BAR)
                 } else {
                     hide()
-                    dbgToast("الرف اتخبى، دوس على الـ Tile لإظهاره")
+                    dbgToast(tr("الرف اتخبى، دوس على الـ Tile لإظهاره", "Shelf hidden, tap the tile to show it"))
                 }
             }
         })
         anim.start()
     }
 
-    // الضغط المطوّل: الرف يتلاشى ويختفي
     private fun animateDisappear() {
         val startY = lp.y
         val anim = ValueAnimator.ofFloat(1f, 0f)
@@ -1158,13 +1244,10 @@ class ShelfController(
 
     // ---------- التقاط الحافظة بالتركيز ----------
 
-    /**
-     * بتخلي نافذة الرف قابلة للتركيز لحظة قصيرة، وده اللي بيسمح لأندرويد نقرا الحافظة.
-     * النتيجة: (نص أو null، رابط صورة أو null، هل اتجاهلنا المحتوى لأنه حساس أو نوع تاني)
-     */
-    fun captureClipboard(onResult: (String?, Uri?, Boolean) -> Unit) {
+    /** النسخة الجديدة: بترجّع كمان ختم وقت النسخ من النظام */
+    fun captureClip(onResult: (ClipSnap) -> Unit) {
         if (!added) {
-            onResult(null, null, false)
+            onResult(ClipSnap(null, null, false, 0L))
             return
         }
         lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
@@ -1172,22 +1255,29 @@ class ShelfController(
             wm.updateViewLayout(root, lp)
         } catch (e: Exception) {
             lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-            onResult(null, null, false)
+            onResult(ClipSnap(null, null, false, 0L))
             return
         }
         attemptCapture(0, onResult)
     }
 
-    private fun attemptCapture(n: Int, onResult: (String?, Uri?, Boolean) -> Unit) {
+    // للتوافق مع الخدمة القديمة
+    fun captureClipboard(onResult: (String?, Uri?, Boolean) -> Unit) {
+        captureClip { s -> onResult(s.text, s.uri, s.skipped) }
+    }
+
+    private fun attemptCapture(n: Int, onResult: (ClipSnap) -> Unit) {
         handler.postDelayed({
             var text: String? = null
             var uri: Uri? = null
             var skip = false
+            var ts = 0L
             try {
                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = cm.primaryClip
                 if (clip != null && clip.itemCount > 0) {
                     val d = clip.description
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && d != null) ts = d.timestamp
                     val sensitive = ShelfBehavior.ignoreSensitive &&
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
                         d?.extras?.getBoolean("android.content.extra.IS_SENSITIVE", false) == true
@@ -1211,12 +1301,11 @@ class ShelfController(
             } else {
                 lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 flushLayout()
-                onResult(text, uri, skip)
+                onResult(ClipSnap(text, uri, skip, ts))
             }
-        }, if (n == 0) 70L else 120L)
+        }, if (n == 0) 40L else 110L)
     }
 
-    // النصوص الطويلة ما بنحللهاش (بتبطّئ، ومحدش بيعمل OTP أو رابط من 1000 حرف)
     private fun detectOf(text: String): Detection {
         if (text.length > 1000) return Detection(ItemKind.TEXT, text)
         val cached = detectCache[text]
@@ -1235,17 +1324,15 @@ class ShelfController(
     private fun handleDrag(e: DragEvent): Boolean {
         when (e.action) {
             DragEvent.ACTION_DRAG_STARTED -> {
-                // سحب خارج من الرف نفسه: بيتعامل معاه الكروت والقايمة مش النافذة
                 if (e.localState == INTERNAL_DRAG) return false
                 if (!isAcceptable(e.clipDescription)) {
-                    dbgToast("سحب مش نص ولا صورة")
+                    dbgToast(tr("سحب مش نص ولا صورة", "Drag is not text or image"))
                     return false
                 }
                 if (userHidden && !ShelfStyle.dragWakesShelf) return false
                 dropActive = false
-                // منطقة إفلات شبه مخفية: بتنوّر لما إصبعك يدخلها
                 if (mode != Mode.OPEN) setMode(Mode.DROP)
-                dbgToast("بدأ سحب: منطقة الإفلات جاهزة")
+                dbgToast(tr("بدأ سحب: منطقة الإفلات جاهزة", "Drag started: drop zone ready"))
                 return true
             }
 
@@ -1268,12 +1355,10 @@ class ShelfController(
                 val cd = e.clipData
                 if (cd != null) {
                     val m = if (cd.description.mimeTypeCount > 0) cd.description.getMimeType(0) else "?"
-                    dbgToast("إفلات: $m")
-                    for (i in 0 until cd.itemCount) {
-                        handleDropped(cd.getItemAt(i), cd.description)
-                    }
+                    dbgToast(tr("إفلات: $m", "Dropped: $m"))
+                    for (i in 0 until cd.itemCount) handleDropped(cd.getItemAt(i), cd.description)
                 } else {
-                    dbgToast("إفلات من غير بيانات")
+                    dbgToast(tr("إفلات من غير بيانات", "Dropped without data"))
                 }
                 return true
             }
@@ -1291,11 +1376,10 @@ class ShelfController(
         val uri = item.uri
         val imageMime = desc?.hasMimeType("image/*") == true
 
-        // سحب صورة من غير رابط: مفيش حاجة نقراها
         if (imageMime && uri == null) {
             Toast.makeText(
                 ctx,
-                "الصورة اتسحبت من غير رابط يتقري. استخدم المشاركة (Share)",
+                tr("الصورة اتسحبت من غير رابط يتقري. استخدم المشاركة (Share)", "The image came without a readable link. Use Share"),
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -1311,18 +1395,20 @@ class ShelfController(
         }
 
         if (isImage && uri != null) {
-            val src = appNameProvider?.invoke() ?: "سحب"
-            dbgToast("صورة من ${uri.authority ?: "?"}")
+            val src = appNameProvider?.invoke() ?: tr("سحب", "Drag")
+            val pkg = pkgProvider?.invoke()
+            dbgToast("image: ${uri.authority ?: "?"}")
             Thread {
                 val path = ImageStore.saveFromUri(ctx, uri)
                 handler.post {
                     if (path != null) {
-                        HistoryRepository.addImage(path, src)
-                        notifyNew("صورة مسحوبة")
+                        HistoryRepository.addImage(path, src, pkg)
+                        notifyNew(tr("صورة مسحوبة", "dragged image"))
                     } else {
                         Toast.makeText(
                             ctx,
-                            "التطبيق ده ما سمحش بقراءة الصورة (${ImageStore.lastError ?: "-"}). استخدم المشاركة (Share)",
+                            tr("التطبيق ده ما سمحش بقراءة الصورة", "That app did not allow reading the image") +
+                                " (${ImageStore.lastError ?: "-"}). " + tr("استخدم المشاركة (Share)", "Use Share"),
                             Toast.LENGTH_LONG
                         ).show()
                     }
@@ -1330,7 +1416,7 @@ class ShelfController(
             }.start()
         } else {
             val t = item.coerceToText(ctx)?.toString()
-            if (t != null) add(t, appNameProvider?.invoke() ?: "سحب")
+            if (t != null) add(t, appNameProvider?.invoke() ?: tr("سحب", "Drag"), pkg = pkgProvider?.invoke())
         }
     }
 
@@ -1347,7 +1433,6 @@ class ShelfController(
         onShownChanged?.invoke(true)
     }
 
-    // الإخفاء: النافذة بتفضل موجودة وشفافة تماماً وضيقة، عشان السحب يفضل شغال
     fun hide() {
         if (!added) return
         userHidden = true
@@ -1372,30 +1457,27 @@ class ShelfController(
         userHidden = false
     }
 
-    // موجودة عشان أي كود قديم ينادي عليها ما يقعش في البناء
     fun pasteFromClipboard() {
         popOpen()
     }
 
-    // فتح كامل صريح (مثلاً بعد مشاركة): بيظهر الرف لو كان مخفي
     fun popOpen() {
         if (!added) return
         if (userHidden) show()
         setMode(Mode.OPEN)
     }
 
-    // وصل عنصر جديد: الفتح بيتبع إعداد "openOnCopy"، والرف المخفي ما بيظهرش
-    fun notifyNew(reason: String = "عنصر جديد") {
+    fun notifyNew(reason: String = "new") {
         if (!added || userHidden || selectMode) return
         when (ShelfBehavior.openOnCopy) {
             ShelfBehavior.OPEN_FULL -> {
-                dbgToast("الرف اتفتح: $reason")
+                dbgToast(tr("الرف اتفتح: $reason", "Shelf opened: $reason"))
                 setMode(Mode.OPEN)
             }
             ShelfBehavior.OPEN_PULSE -> pulse()
             else -> {
                 if (mode != Mode.OPEN) {
-                    dbgToast("معاينة: $reason")
+                    dbgToast(tr("معاينة: $reason", "Peek: $reason"))
                     setMode(Mode.PEEK)
                 } else {
                     resetAutoClose()
@@ -1411,11 +1493,11 @@ class ShelfController(
         }.start()
     }
 
-    fun add(text: String, source: String = "تطبيق", popUp: Boolean = true) {
+    fun add(text: String, source: String = tr("تطبيق", "App"), popUp: Boolean = true, pkg: String? = null) {
         val t = text.trim()
         if (t.isEmpty()) return
-        HistoryRepository.add(t, source)
-        if (popUp) notifyNew("نسخ جديد من $source")
+        HistoryRepository.add(t, source, pkg ?: pkgProvider?.invoke())
+        if (popUp) notifyNew(tr("نسخ جديد من $source", "new copy from $source"))
     }
 
     fun setExpanded(on: Boolean) {
@@ -1444,8 +1526,6 @@ class ShelfController(
         is Row.Group -> r.members
     }
 
-    // الترتيب: المثبّت الأول، وبعدين (لو مفعّل) اللي لسه ما اتلصقش، وبعدين الأحدث نسخاً.
-    // اللصق نفسه ما بيغيّرش الترتيب.
     private fun buildRows(): List<Row> {
         val groups = LinkedHashMap<String, ArrayList<ShelfItem>>()
         val rows = ArrayList<Row>()
@@ -1479,8 +1559,8 @@ class ShelfController(
         otpLabels.clear()
         shownItems.clear()
         list.removeAllViews()
-        countTv.text = if (items.isEmpty()) "فارغ" else "${items.size} عنصر"
-        selectCountTv.text = "${selected.size} محدد"
+        countTv.text = if (items.isEmpty()) tr("فارغ", "Empty") else tr("${items.size} عنصر", "${items.size} items")
+        selectCountTv.text = "${selected.size}"
 
         val m = manualInfo
         if (m != null) list.addView(buildManualBanner(m))
@@ -1488,7 +1568,7 @@ class ShelfController(
         val rows = buildRows()
         if (rows.isEmpty()) {
             val empty = TextView(ctx)
-            empty.text = "الرف فارغ\nانسخ أي نص أو اسحبه هنا"
+            empty.text = tr("الرف فارغ\nانسخ أي نص أو اسحبه هنا", "The shelf is empty\nCopy any text or drag it here")
             empty.setTextColor(ShelfStyle.subTextColor)
             empty.typeface = ShelfStyle.tf(Typeface.NORMAL)
             empty.textSize = sz(13f)
@@ -1498,7 +1578,6 @@ class ShelfController(
         } else {
             var index = 0
             if (selectMode) {
-                // وضع التحديد: كل العناصر منفردة عشان تقدر تختارها
                 for (r in rows) {
                     for (mem in membersOf(r)) {
                         shownItems.add(mem)
@@ -1527,7 +1606,7 @@ class ShelfController(
         handler.post(ticker)
     }
 
-    // ---------- التحديد ----------
+    // ---------- التحديد والتجميع ----------
 
     private fun keyOf(item: ShelfItem): String =
         "${item.timestamp}|${item.imagePath ?: item.text.hashCode().toString()}"
@@ -1538,6 +1617,14 @@ class ShelfController(
     private fun toggleSelected(item: ShelfItem) {
         val k = keyOf(item)
         if (!selected.remove(k)) selected.add(k)
+        DiagLog.d("shelf", "toggle select -> ${selected.size}")
+        render()
+    }
+
+    private fun selectAll() {
+        selected.clear()
+        for (i in items) selected.add(keyOf(i))
+        DiagLog.d("shelf", "select all -> ${selected.size}")
         render()
     }
 
@@ -1547,6 +1634,7 @@ class ShelfController(
         selectMode = true
         selected.clear()
         handler.removeCallbacks(collapseRunnable)
+        DiagLog.d("shelf", "select mode on")
         applyVisual()
         flushLayout()
         render()
@@ -1563,19 +1651,22 @@ class ShelfController(
 
     private fun doGroupSelected() {
         val sel = selectedItems()
+        DiagLog.d("shelf", "group pressed: keys=${selected.size} resolved=${sel.size}")
         if (sel.size < 2) {
-            Toast.makeText(ctx, "اختار عنصرين على الأقل", Toast.LENGTH_SHORT).show()
+            toast(tr("اختار عنصرين على الأقل", "Select at least two items"))
             return
         }
         val gid = HistoryRepository.createGroup(sel, null)
+        toast(tr("اتجمّع ${sel.size} عناصر", "Grouped ${sel.size} items"))
         exitSelect(true)
         openNameDialog(GroupNameActivity.MODE_NAME_NEW, gid, null)
     }
 
     private fun doUngroupSelected() {
         val sel = selectedItems().filter { it.groupId != null }
+        DiagLog.d("shelf", "ungroup pressed: ${sel.size}")
         if (sel.isEmpty()) {
-            Toast.makeText(ctx, "مفيش عناصر مجمّعة في اللي اخترته", Toast.LENGTH_SHORT).show()
+            toast(tr("مفيش عناصر مجمّعة في اللي اخترته", "No grouped items in your selection"))
             return
         }
         HistoryRepository.removeFromGroup(sel)
@@ -1584,7 +1675,8 @@ class ShelfController(
 
     private fun doDeleteSelected() {
         val sel = selectedItems().filter { !it.isPinned }
-        for (s in sel) HistoryRepository.remove(s)
+        DiagLog.d("shelf", "delete selected: ${sel.size}")
+        HistoryRepository.removeMany(sel)
         exitSelect(true)
     }
 
@@ -1598,7 +1690,8 @@ class ShelfController(
         try {
             ctx.startActivity(i)
         } catch (e: Exception) {
-            Toast.makeText(ctx, "تعذر فتح شاشة التسمية", Toast.LENGTH_SHORT).show()
+            DiagLog.d("shelf", "name dialog failed: ${e.javaClass.simpleName} ${e.message}")
+            toast(tr("تعذر فتح شاشة التسمية", "Could not open the naming screen"))
         }
     }
 
@@ -1609,42 +1702,36 @@ class ShelfController(
         try {
             ctx.startActivity(intent)
         } catch (e: Exception) {
-            Toast.makeText(ctx, "افتح التطبيق من الأيقونة", Toast.LENGTH_SHORT).show()
+            toast(tr("افتح التطبيق من الأيقونة", "Open the app from its icon"))
         }
     }
 
-    // ---------- القايمة ----------
+    // ---------- القايمة وسجل التشخيص ----------
 
     private fun showCustomMenu() {
         if (mode != Mode.OPEN) return
         hideCustomMenu()
+        hideDiag()
 
         val menu = LinearLayout(ctx)
         menu.orientation = LinearLayout.VERTICAL
         val mp = px(8)
         menu.setPadding(mp, mp, mp, mp)
-        val mbg = GradientDrawable()
-        mbg.cornerRadius = 14 * dp
-        mbg.setColor(ShelfStyle.menuColor)
-        mbg.setStroke(px(1), ShelfStyle.panelStroke)
-        menu.background = mbg
-
-        val lpMenu = FrameLayout.LayoutParams(
-            px(210),
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END
-        )
-        lpMenu.topMargin = px(50)
-        lpMenu.marginEnd = px(10)
-        menu.layoutParams = lpMenu
 
         val entries = ArrayList<Pair<String, String>>()
-        entries.add("history" to "السجل")
-        entries.add("select" to "تحديد وتجميع")
-        entries.add("group" to (if (manualInfo == null) "مجموعة جديدة…" else "إنهاء المجموعة الجارية"))
+        entries.add("history" to tr("السجل", "History"))
+        entries.add("select" to tr("تحديد وتجميع", "Select & group"))
+        entries.add(
+            "group" to (if (manualInfo == null) tr("مجموعة جديدة…", "New group…")
+            else tr("إنهاء المجموعة الجارية", "End current group"))
+        )
+        entries.add("clearU" to tr("مسح غير المثبّت", "Clear unpinned"))
+        entries.add("clearP" to tr("مسح اللي اتلصق", "Clear pasted"))
+        entries.add("clearI" to tr("مسح الصور", "Clear images"))
         entries.add("private" to privateLabel())
-        entries.add("settings" to "الإعدادات")
-        entries.add("close" to "إغلاق")
+        entries.add("settings" to tr("الإعدادات", "Settings"))
+        entries.add("diag" to tr("سجل التشخيص", "Diagnostics"))
+        entries.add("close" to tr("إغلاق", "Close"))
 
         for ((index, entry) in entries.withIndex()) {
             val key = entry.first
@@ -1655,11 +1742,12 @@ class ShelfController(
                 when (key) {
                     "private" -> PRIVATE_COLOR
                     "group" -> MANUAL_COLOR
+                    "clearU", "clearP", "clearI" -> ShelfStyle.deleteColorStart
                     else -> ShelfStyle.textColor
                 }
             )
             tv.textSize = 15f
-            tv.setPadding(px(14), px(12), px(14), px(12))
+            tv.setPadding(px(14), px(11), px(14), px(11))
             tv.setOnClickListener {
                 hideCustomMenu()
                 when (key) {
@@ -1670,11 +1758,15 @@ class ShelfController(
                             openNameDialog(GroupNameActivity.MODE_START, null, null)
                         } else {
                             HistoryRepository.endManualGroup()
-                            Toast.makeText(ctx, "المجموعة اتقفلت", Toast.LENGTH_SHORT).show()
+                            toast(tr("المجموعة اتقفلت", "Group closed"))
                         }
                     }
+                    "clearU" -> HistoryRepository.clearUnpinned()
+                    "clearP" -> HistoryRepository.clearPasted()
+                    "clearI" -> HistoryRepository.clearImages()
                     "private" -> togglePrivate()
                     "settings" -> openScreen(SettingsActivity::class.java)
+                    "diag" -> showDiag()
                     "close" -> setMode(Mode.BAR)
                 }
             }
@@ -1682,16 +1774,31 @@ class ShelfController(
 
             if (index < entries.size - 1) {
                 val divider = View(ctx)
-                divider.layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    px(1)
-                )
+                divider.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(1))
                 divider.setBackgroundColor(withAlpha(ShelfStyle.accent, 0x26))
                 menu.addView(divider)
             }
         }
-        customMenu = menu
-        root.addView(menu)
+
+        val maxH = (lp.height - px(70)).coerceAtLeast(px(160))
+        val sv = MaxHeightScroll(ctx, maxH)
+        sv.addView(menu)
+        sv.isVerticalScrollBarEnabled = false
+        val mbg = GradientDrawable()
+        mbg.cornerRadius = 14 * dp
+        mbg.setColor(ShelfStyle.menuColor)
+        mbg.setStroke(px(1), ShelfStyle.panelStroke)
+        sv.background = mbg
+        val lpMenu = FrameLayout.LayoutParams(
+            px(220),
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END
+        )
+        lpMenu.topMargin = px(50)
+        lpMenu.marginEnd = px(10)
+        sv.layoutParams = lpMenu
+        customMenu = sv
+        root.addView(sv)
     }
 
     private fun hideCustomMenu() {
@@ -1700,22 +1807,90 @@ class ShelfController(
         customMenu = null
     }
 
+    private fun showDiag() {
+        hideDiag()
+        if (mode != Mode.OPEN) return
+        val layer = LinearLayout(ctx)
+        layer.orientation = LinearLayout.VERTICAL
+        layer.setPadding(px(10), px(8), px(10), px(8))
+        val bg = GradientDrawable()
+        bg.cornerRadius = 14 * dp
+        bg.setColor(ShelfStyle.menuColor)
+        bg.setStroke(px(1), ShelfStyle.panelStroke)
+        layer.background = bg
+
+        val head = LinearLayout(ctx)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+        val title = TextView(ctx)
+        title.text = tr("سجل التشخيص", "Diagnostics")
+        title.setTextColor(ShelfStyle.textColor)
+        title.typeface = ShelfStyle.tf(Typeface.BOLD)
+        title.textSize = 14f
+        title.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        head.addView(title)
+
+        val body = TextView(ctx)
+        body.text = DiagLog.dump(60).ifBlank { tr("(فاضي)", "(empty)") }
+        body.setTextColor(ShelfStyle.subTextColor)
+        body.typeface = Typeface.MONOSPACE
+        body.textSize = 9.5f
+        body.setTextIsSelectable(false)
+
+        head.addView(pill(tr("نسخ", "Copy"), ShelfStyle.accent, true, true) {
+            HistoryRepository.ignoreClipUntil = System.currentTimeMillis() + 1500
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("hubsync-diag", DiagLog.dump(300)))
+            toast(tr("اتنسخ سجل التشخيص", "Diagnostics copied"))
+        })
+        head.addView(pill(tr("مسح", "Clear"), ShelfStyle.deleteColorStart, false, true) {
+            DiagLog.clear()
+            body.text = tr("(فاضي)", "(empty)")
+        })
+        head.addView(pill("✕", ShelfStyle.subTextColor, false, true) { hideDiag() })
+        layer.addView(head)
+
+        val sv = ScrollView(ctx)
+        sv.addView(body)
+        sv.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
+        ).apply { topMargin = px(8) }
+        layer.addView(sv)
+
+        val p = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        )
+        p.topMargin = headerPx
+        p.setMargins(px(8), headerPx, px(8), px(8))
+        layer.layoutParams = p
+        diagLayer = layer
+        handler.removeCallbacks(collapseRunnable)
+        root.addView(layer)
+    }
+
+    private fun hideDiag() {
+        val d = diagLayer ?: return
+        root.removeView(d)
+        diagLayer = null
+        resetAutoClose()
+    }
+
     // ---------- إجراءات الكروت ----------
 
     private fun copyText(t: String) {
         HistoryRepository.ignoreClipUntil = System.currentTimeMillis() + 1500
         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("hubsync", t))
-        Toast.makeText(ctx, "تم النسخ", Toast.LENGTH_SHORT).show()
+        toast(tr("تم النسخ", "Copied"))
     }
 
-    // نسخ صورة للحافظة: بنعلّمها "اتنسخت" من غير ما نغيّر مكانها
     private fun copyImage(item: ShelfItem, path: String) {
         if (ImageStore.copyImage(ctx, path)) {
             HistoryRepository.markPasted(item, true)
-            Toast.makeText(ctx, "تم نسخ الصورة، الصقها في المكان اللي عايزه", Toast.LENGTH_SHORT).show()
+            toast(tr("تم نسخ الصورة، الصقها في المكان اللي عايزه", "Image copied, paste it where you want"))
         } else {
-            Toast.makeText(ctx, "تعذر نسخ الصورة", Toast.LENGTH_SHORT).show()
+            toast(tr("تعذر نسخ الصورة", "Could not copy the image"))
         }
     }
 
@@ -1724,12 +1899,11 @@ class ShelfController(
         try {
             ctx.startActivity(intent)
         } catch (e: Exception) {
-            Toast.makeText(ctx, "مفيش تطبيق يفتح ده", Toast.LENGTH_SHORT).show()
+            toast(tr("مفيش تطبيق يفتح ده", "No app can open this"))
         }
         setMode(Mode.BAR)
     }
 
-    // واتساب محتاج رقم بكود الدولة، والرقم المحلي (0101...) ممكن مايفتحش
     private fun whatsappUri(number: String): Uri {
         var d = number.filter { it.isDigit() }
         if (d.startsWith("00")) d = d.substring(2)
@@ -1737,11 +1911,11 @@ class ShelfController(
     }
 
     private fun kindLabel(k: ItemKind): String = when (k) {
-        ItemKind.OTP -> "كود تحقق"
-        ItemKind.LINK -> "رابط"
-        ItemKind.PHONE -> "هاتف"
-        ItemKind.EMAIL -> "بريد"
-        ItemKind.TEXT -> "نص"
+        ItemKind.OTP -> tr("كود تحقق", "OTP")
+        ItemKind.LINK -> tr("رابط", "Link")
+        ItemKind.PHONE -> tr("هاتف", "Phone")
+        ItemKind.EMAIL -> tr("بريد", "Email")
+        ItemKind.TEXT -> tr("نص", "Text")
     }
 
     private fun payloadOf(item: ShelfItem): String {
@@ -1749,9 +1923,9 @@ class ShelfController(
         return if (det.kind == ItemKind.OTP) det.value else item.text
     }
 
-    // لصق عنصر في الخانة المفتوحة: لو نجح بنعلّمه "اتلصق" من غير ما نغيّر مكانه
     private fun insertItem(item: ShelfItem) {
         val ok = onInsert(payloadOf(item))
+        DiagLog.d("shelf", "insert -> $ok")
         if (ok) {
             if (ShelfBehavior.autoRemoveAfterPaste && !item.isPinned) {
                 HistoryRepository.remove(item)
@@ -1762,13 +1936,12 @@ class ShelfController(
         setMode(Mode.BAR)
     }
 
-    // لصق بالترتيب: أول عنصر في المجموعة لسه ما اتلصقش
     private fun pasteNext(members: List<ShelfItem>) {
         val next = members.firstOrNull { it.pastedAt == 0L && it.imagePath == null }
         if (next == null) {
             Toast.makeText(
                 ctx,
-                "كل عناصر المجموعة اتلصقت. دوس على علامة ✓ في أي كارت لإعادته",
+                tr("كل عناصر المجموعة اتلصقت. دوس على علامة ✓ في أي كارت لإعادته", "Everything in the group was pasted. Tap ✓ on a card to reset it"),
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -1776,10 +1949,9 @@ class ShelfController(
         insertItem(next)
     }
 
-    // حذف بزرار ✕: بنشيل الكارت (وحاويته) من الشاشة الأول وبعدين من المخزن
     private fun deleteItem(item: ShelfItem, card: View) {
         if (item.isPinned) {
-            Toast.makeText(ctx, "ألغِ التثبيت الأول", Toast.LENGTH_SHORT).show()
+            toast(tr("ألغِ التثبيت الأول", "Unpin it first"))
             return
         }
         val container = (card.parent as? View) ?: card
@@ -1787,23 +1959,26 @@ class ShelfController(
         HistoryRepository.remove(item)
     }
 
-    // حذف بالسحب
     private fun dismissItem(item: ShelfItem, container: View) {
+        DiagLog.d("shelf", "swipe dismiss")
         (container.parent as? LinearLayout)?.removeView(container)
         HistoryRepository.remove(item)
     }
 
-    private fun pill(label: String, color: Int, primary: Boolean, onClick: () -> Unit): TextView {
+    private fun pill(label: String, color: Int, primary: Boolean, onClick: () -> Unit): TextView =
+        pill(label, color, primary, false, onClick)
+
+    private fun pill(label: String, color: Int, primary: Boolean, compact: Boolean, onClick: () -> Unit): TextView {
         val tv = TextView(ctx)
         tv.text = label
-        tv.textSize = 12f
+        tv.textSize = if (compact) 11.5f else 12f
         tv.typeface = ShelfStyle.tf(if (primary) Typeface.BOLD else Typeface.NORMAL)
-        tv.setPadding(px(14), px(6), px(14), px(6))
+        if (compact) tv.setPadding(px(10), px(5), px(10), px(5)) else tv.setPadding(px(14), px(6), px(14), px(6))
         val b = GradientDrawable()
         b.cornerRadius = 20 * dp
         if (primary) {
             b.setColor(withAlpha(color, 0xE6))
-            tv.setTextColor(Color.parseColor("#0A1730"))
+            tv.setTextColor(if (Palette.luminance(color) > 0.55f) Color.parseColor("#0A1730") else Color.WHITE)
         } else {
             b.setColor(Color.TRANSPARENT)
             b.setStroke(px(1), withAlpha(color, 0x99))
@@ -1865,7 +2040,7 @@ class ShelfController(
                     highlight(v, false)
                     if (src != null && !sameItem(src, target)) {
                         HistoryRepository.dropOn(src, target)
-                        Toast.makeText(ctx, "اتضافت للمجموعة", Toast.LENGTH_SHORT).show()
+                        toast(tr("اتضافت للمجموعة", "Added to the group"))
                     }
                     true
                 }
@@ -1913,7 +2088,6 @@ class ShelfController(
         return p
     }
 
-    // الصف الأول: (مربع تحديد) + شارة النوع + علامة اتلصق/اتنسخت + عد تنازلي + نجمة + حذف
     private fun buildTopRow(
         item: ShelfItem,
         label: String,
@@ -1946,10 +2120,9 @@ class ShelfController(
         chip.background = chipBg
         top.addView(chip)
 
-        // علامة "اتلصق" (أو "اتنسخت" للصور): دوس عليها تلغيها
         if (item.pastedAt > 0L && !selectMode) {
             val pc = TextView(ctx)
-            pc.text = if (item.imagePath != null) "✓ اتنسخت" else "✓ اتلصق"
+            pc.text = if (item.imagePath != null) tr("✓ اتنسخت", "✓ copied") else tr("✓ اتلصق", "✓ pasted")
             pc.textSize = 10.5f
             pc.setTextColor(ShelfStyle.accent)
             pc.setPadding(px(8), px(2), px(8), px(2))
@@ -1977,7 +2150,7 @@ class ShelfController(
             cd.setTextColor(ShelfStyle.subTextColor)
             val left = ((ShelfStyle.otpTtlMs - (System.currentTimeMillis() - item.timestamp)) / 1000)
                 .coerceAtLeast(0)
-            cd.text = "ينتهي بعد ${left}ث"
+            cd.text = otpText(left)
             top.addView(cd)
             otpLabels.add(Pair(item, cd))
         }
@@ -2002,13 +2175,37 @@ class ShelfController(
         return top
     }
 
-    private fun buildMeta(item: ShelfItem): TextView {
+    // السطر الأخير في الكارت: أيقونة التطبيق المصدر + الاسم + الوقت
+    private fun buildMeta(item: ShelfItem): View {
+        val row = LinearLayout(ctx)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+
+        val pkg = item.sourcePkg
+        if (pkg != null) {
+            val iv = ImageView(ctx)
+            iv.tag = pkg
+            val ip = LinearLayout.LayoutParams(px(14), px(14))
+            ip.marginEnd = px(6)
+            iv.layoutParams = ip
+            iv.background = GradientDrawable().apply {
+                cornerRadius = 4 * dp
+                setColor(Color.parseColor("#22FFFFFF"))
+            }
+            iv.clipToOutline = true
+            SourceIcons.load(ctx, pkg, px(28)) { bmp ->
+                if (iv.tag == pkg && bmp != null) iv.setImageBitmap(bmp)
+            }
+            row.addView(iv)
+        }
+
         val meta = TextView(ctx)
-        meta.text = "${item.source} • ${timeFormat.format(Date(item.timestamp))}"
+        meta.text = "${item.source} • ${fmtTime(item.timestamp)}"
         meta.setTextColor(ShelfStyle.metaColor)
         meta.typeface = ShelfStyle.tf(Typeface.NORMAL)
         meta.textSize = sz(11f)
-        return meta
+        row.addView(meta)
+        return row
     }
 
     private fun newActionsRow(): LinearLayout {
@@ -2023,7 +2220,6 @@ class ShelfController(
         return actions
     }
 
-    // بيلف الكارت في حاوية سحب: خلفية متدرجة (أحمر لطيف ← أبيض) + سلة بتظهر تدريجياً مع السحب
     private fun wrapSwipe(card: View, item: ShelfItem, compact: Boolean): View {
         val frame = SwipeLayout(ctx)
         frame.layoutParams = cardLayoutParams(compact)
@@ -2064,7 +2260,6 @@ class ShelfController(
         frame.onProgress = { p, dir ->
             redBg.alpha = p * 0.95f
             trash.progress = p
-            // الأحمر عند ناحية السلة ويتدرج لأبيض ناحية الكارت
             redDrawable.orientation = if (dir > 0) {
                 GradientDrawable.Orientation.LEFT_RIGHT
             } else {
@@ -2101,7 +2296,6 @@ class ShelfController(
 
         card.addView(buildTopRow(item, kindLabel(det.kind), color, card, det.kind == ItemKind.OTP))
 
-        // المحتوى (بنعرض أول جزء بس من النص الطويل)
         val content = TextView(ctx)
         if (det.kind == ItemKind.OTP) {
             content.text = det.value
@@ -2121,39 +2315,38 @@ class ShelfController(
             content.typeface = ShelfStyle.tf(if (ShelfStyle.boldText) Typeface.BOLD else Typeface.NORMAL)
             content.textSize = sz(14f)
             content.maxLines = 3
-            content.ellipsize = android.text.TextUtils.TruncateAt.END
+            content.ellipsize = TextUtils.TruncateAt.END
         }
         content.setPadding(0, px(6), 0, px(2))
         card.addView(content)
         card.addView(buildMeta(item))
 
-        // أزرار الإجراء حسب النوع (مش بتظهر في وضع التحديد)
         if (!selectMode) {
             val actions = newActionsRow()
             when (det.kind) {
                 ItemKind.OTP -> {
-                    actions.addView(pill("نسخ الكود", color, true) { copyText(det.value) })
+                    actions.addView(pill(tr("نسخ الكود", "Copy code"), color, true) { copyText(det.value) })
                 }
                 ItemKind.LINK -> {
-                    actions.addView(pill("فتح", color, true) {
+                    actions.addView(pill(tr("فتح", "Open"), color, true) {
                         startExternal(Intent(Intent.ACTION_VIEW, Uri.parse(det.value)))
                     })
-                    actions.addView(pill("نسخ", color, false) { copyText(det.value) })
+                    actions.addView(pill(tr("نسخ", "Copy"), color, false) { copyText(det.value) })
                 }
                 ItemKind.PHONE -> {
-                    actions.addView(pill("اتصال", color, true) {
+                    actions.addView(pill(tr("اتصال", "Call"), color, true) {
                         startExternal(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(det.value))))
                     })
-                    actions.addView(pill("واتساب", color, false) {
+                    actions.addView(pill("WhatsApp", color, false) {
                         startExternal(Intent(Intent.ACTION_VIEW, whatsappUri(det.value)))
                     })
-                    actions.addView(pill("نسخ", color, false) { copyText(det.value) })
+                    actions.addView(pill(tr("نسخ", "Copy"), color, false) { copyText(det.value) })
                 }
                 ItemKind.EMAIL -> {
-                    actions.addView(pill("مراسلة", color, true) {
+                    actions.addView(pill(tr("مراسلة", "Email"), color, true) {
                         startExternal(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:" + det.value)))
                     })
-                    actions.addView(pill("نسخ", color, false) { copyText(det.value) })
+                    actions.addView(pill(tr("نسخ", "Copy"), color, false) { copyText(det.value) })
                 }
                 ItemKind.TEXT -> {
                 }
@@ -2161,12 +2354,10 @@ class ShelfController(
             if (actions.childCount > 0) card.addView(actions)
         }
 
-        // الضغط على الكارت بيلصق النص في الخانة المفتوحة (أو بيحدّده في وضع التحديد)
         card.setOnClickListener {
             if (selectMode) toggleSelected(item) else insertItem(item)
         }
         if (!selectMode) {
-            // ضغطة مطولة وسحب: فوق كارت/مجموعة جوه الرف بيضم، وفوق تطبيق تاني بيلصق
             card.setOnLongClickListener { v: View ->
                 dragSource = item
                 val clip = ClipData.newPlainText("hubsync", payloadOf(item))
@@ -2191,7 +2382,7 @@ class ShelfController(
         card.background = cardBackground(color, selectMode && selected.contains(keyOf(item)))
         if (item.pastedAt > 0L && ShelfBehavior.pasteDim) card.alpha = ShelfStyle.pastedAlpha
 
-        card.addView(buildTopRow(item, "صورة", color, card, false))
+        card.addView(buildTopRow(item, tr("صورة", "Image"), color, card, false))
 
         val iv = ImageView(ctx)
         iv.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -2201,10 +2392,7 @@ class ShelfController(
         ivBg.setColor(Color.parseColor("#22FFFFFF"))
         iv.background = ivBg
         iv.clipToOutline = true
-        val ivp = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            px(150)
-        )
+        val ivp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, px(150))
         ivp.topMargin = px(8)
         ivp.bottomMargin = px(6)
         iv.layoutParams = ivp
@@ -2217,10 +2405,10 @@ class ShelfController(
 
         if (!selectMode) {
             val actions = newActionsRow()
-            actions.addView(pill("مشاركة", color, true) {
+            actions.addView(pill(tr("مشاركة", "Share"), color, true) {
                 startExternal(ImageStore.shareIntent(ctx, path))
             })
-            actions.addView(pill("نسخ", color, false) { copyImage(item, path) })
+            actions.addView(pill(tr("نسخ", "Copy"), color, false) { copyImage(item, path) })
             card.addView(actions)
         }
 
@@ -2232,7 +2420,6 @@ class ShelfController(
                 setMode(Mode.BAR)
             }
         }
-        // ضغطة مطولة: ضم لمجموعة جوه الرف، أو سحب الصورة لتطبيق تاني (لو بيقبل صور)
         if (!selectMode) {
             card.setOnLongClickListener { v: View ->
                 try {
@@ -2260,6 +2447,18 @@ class ShelfController(
 
     // ---------- المجموعات ----------
 
+    private fun isCollapsedGroup(id: String): Boolean =
+        if (ShelfBehavior.groupsStartCollapsed) id !in expandedGroups else id in collapsedGroups
+
+    private fun toggleGroup(id: String) {
+        if (ShelfBehavior.groupsStartCollapsed) {
+            if (!expandedGroups.remove(id)) expandedGroups.add(id)
+        } else {
+            if (!collapsedGroups.remove(id)) collapsedGroups.add(id)
+        }
+        render()
+    }
+
     private fun buildManualBanner(m: HistoryRepository.ManualGroup): View {
         val count = items.count { it.groupId == m.id }
         val row = LinearLayout(ctx)
@@ -2275,17 +2474,16 @@ class ShelfController(
 
         val tv = TextView(ctx)
         val nm = m.name
-        tv.text = "مجموعة قيد الإنشاء" + (if (nm != null) ": $nm" else "") + " • $count"
+        tv.text = tr("مجموعة قيد الإنشاء", "Group in progress") + (if (nm != null) ": $nm" else "") + " • $count"
         tv.textSize = 12f
         tv.typeface = ShelfStyle.tf(Typeface.NORMAL)
         tv.setTextColor(MANUAL_COLOR)
         tv.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         row.addView(tv)
-        row.addView(pill("إنهاء", MANUAL_COLOR, true) { HistoryRepository.endManualGroup() })
+        row.addView(pill(tr("إنهاء", "End"), MANUAL_COLOR, true) { HistoryRepository.endManualGroup() })
         return row
     }
 
-    // سطر معاينة صغير لعنصر داخل مجموعة مطوية
     private fun previewLine(mem: ShelfItem, color: Int): View {
         val row = LinearLayout(ctx)
         row.orientation = LinearLayout.HORIZONTAL
@@ -2303,14 +2501,14 @@ class ShelfController(
         row.addView(dot)
 
         val tv = TextView(ctx)
-        val base = if (mem.imagePath != null) "[صورة]" else mem.text.replace('\n', ' ').trim()
+        val base = if (mem.imagePath != null) tr("[صورة]", "[image]") else mem.text.replace('\n', ' ').trim()
         val clipped = if (base.length > 44) base.substring(0, 44) + "…" else base
         tv.text = (if (mem.pastedAt > 0L) "✓ " else "") + clipped
         tv.textSize = sz(13f)
         tv.maxLines = 1
         tv.typeface = ShelfStyle.tf(Typeface.NORMAL)
         tv.setTextColor(if (mem.pastedAt > 0L) ShelfStyle.subTextColor else ShelfStyle.textColor)
-        tv.ellipsize = android.text.TextUtils.TruncateAt.END
+        tv.ellipsize = TextUtils.TruncateAt.END
         row.addView(tv)
         return row
     }
@@ -2319,7 +2517,7 @@ class ShelfController(
         val id = r.id
         val members = r.members
         val color = GROUP_COLORS[(id.hashCode() and 0x7fffffff) % GROUP_COLORS.size]
-        val collapsed = ShelfBehavior.isCollapsed(id)
+        val collapsed = isCollapsedGroup(id)
         val hasFile = ShelfBehavior.groupCodeFile &&
             members.any { HistoryRepository.fileNameOf(it.text) != null }
         val explicit = members.firstOrNull { !it.groupName.isNullOrBlank() }?.groupName
@@ -2328,7 +2526,7 @@ class ShelfController(
         } else {
             null
         }
-        val title = explicit ?: auto ?: "مجموعة"
+        val title = explicit ?: auto ?: tr("مجموعة", "Group")
 
         val box = LinearLayout(ctx)
         box.orientation = LinearLayout.VERTICAL
@@ -2340,7 +2538,6 @@ class ShelfController(
         box.background = boxBg
         box.layoutParams = cardLayoutParams(false)
 
-        // الترويسة
         val head = LinearLayout(ctx)
         head.orientation = LinearLayout.HORIZONTAL
         head.gravity = Gravity.CENTER_VERTICAL
@@ -2355,7 +2552,7 @@ class ShelfController(
 
         if (hasFile) {
             val kc = TextView(ctx)
-            kc.text = "ملف كود"
+            kc.text = tr("ملف كود", "Code file")
             kc.textSize = 10.5f
             kc.setTextColor(color)
             kc.typeface = ShelfStyle.tf(Typeface.BOLD)
@@ -2379,13 +2576,14 @@ class ShelfController(
         titleView.setTextColor(ShelfStyle.textColor)
         titleView.typeface = ShelfStyle.tf(Typeface.BOLD)
         titleView.maxLines = 1
-        titleView.ellipsize = android.text.TextUtils.TruncateAt.END
+        titleView.ellipsize = TextUtils.TruncateAt.END
         titleView.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         head.addView(titleView)
 
         val done = members.count { it.pastedAt > 0L }
         val meta = TextView(ctx)
-        meta.text = if (done > 0) "اتلصق $done/${members.size}" else "${members.size} عناصر"
+        meta.text = if (done > 0) tr("اتلصق $done/${members.size}", "pasted $done/${members.size}")
+        else tr("${members.size} عناصر", "${members.size} items")
         meta.textSize = 11f
         meta.setTextColor(if (done == members.size) ShelfStyle.accent else ShelfStyle.subTextColor)
         meta.setPadding(px(6), 0, px(6), 0)
@@ -2405,24 +2603,17 @@ class ShelfController(
         del.textSize = 14f
         del.setTextColor(ShelfStyle.subTextColor)
         del.setPadding(px(12), 0, px(2), 0)
-        del.setOnClickListener {
-            HistoryRepository.removeGroup(id)
-            Toast.makeText(ctx, "اتمسحت المجموعة (المثبّت بيفضل)", Toast.LENGTH_SHORT).show()
-        }
+        del.setOnClickListener { HistoryRepository.removeGroup(id) }
         head.addView(del)
 
-        head.setOnClickListener {
-            ShelfBehavior.setCollapsed(id, !collapsed)
-            render()
-        }
+        head.setOnClickListener { toggleGroup(id) }
         box.addView(head)
 
         if (collapsed) {
-            // مطوية: أول سطرين + "+N"
             for (mem in members.take(2)) box.addView(previewLine(mem, color))
             if (members.size > 2) {
                 val more = TextView(ctx)
-                more.text = "+${members.size - 2} أخرى"
+                more.text = tr("+${members.size - 2} أخرى", "+${members.size - 2} more")
                 more.textSize = 11f
                 more.setTextColor(color)
                 more.setPadding(px(6), px(2), px(6), px(4))
@@ -2435,11 +2626,11 @@ class ShelfController(
         ap.topMargin = px(6)
         ap.bottomMargin = px(8)
         act.layoutParams = ap
-        act.addView(pill("لصق التالي", color, true) { pasteNext(members) })
-        act.addView(pill("تسمية", color, false) {
+        act.addView(pill(tr("لصق التالي", "Paste next"), color, true) { pasteNext(members) })
+        act.addView(pill(tr("تسمية", "Rename"), color, false) {
             openNameDialog(GroupNameActivity.MODE_RENAME, id, explicit)
         })
-        act.addView(pill("فك", color, false) { HistoryRepository.ungroup(id) })
+        act.addView(pill(tr("فك", "Ungroup"), color, false) { HistoryRepository.ungroup(id) })
         box.addView(act)
 
         if (!collapsed) {
@@ -2448,7 +2639,6 @@ class ShelfController(
             }
         }
 
-        // الإفلات على المجموعة نفسها بيضم الكارت ليها
         attachInternalDrop(box, members.first())
         return box
     }
