@@ -3,9 +3,12 @@ package com.bfbai.superhub.utils
 
 import android.content.Context
 import android.content.SharedPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * سياسة الخصوصية: مين يتلقط منه ومين لأ. الواجهة بتاعتها هتيجي مع شاشة الإعدادات.
+ * سياسة الخصوصية: مين يتلقط منه ومين لأ.
  * الافتراضي: يلتقط من كل التطبيقات، ومفيش استثناءات، والمسح التلقائي مقفول.
  */
 object PrivacyPolicy {
@@ -16,16 +19,25 @@ object PrivacyPolicy {
     // يلتقط من تطبيقات القائمة المسموحة بس
     const val MODE_ALLOW_ONLY = "allow_only"
 
-    private lateinit var prefs: SharedPreferences
+    private var prefs: SharedPreferences? = null
 
     @Volatile
     private var privateUntil: Long = 0L
 
+    // أي تغيير هنا بيتبلّغ للشاشات اللي بتعرضه (الإعدادات) فتتحدث فوراً
+    private val ver = MutableStateFlow(0)
+    val changes: StateFlow<Int> = ver.asStateFlow()
+
+    private fun bump() {
+        ver.value = ver.value + 1
+    }
+
     @Synchronized
     fun init(ctx: Context) {
-        if (::prefs.isInitialized) return
-        prefs = ctx.applicationContext.getSharedPreferences("hubsync_privacy", Context.MODE_PRIVATE)
-        privateUntil = prefs.getLong("private_until", 0L)
+        if (prefs != null) return
+        val p = ctx.applicationContext.getSharedPreferences("hubsync_privacy", Context.MODE_PRIVATE)
+        prefs = p
+        privateUntil = p.getLong("private_until", 0L)
     }
 
     // ---------- الوضع الخاص ----------
@@ -36,41 +48,39 @@ object PrivacyPolicy {
 
     fun startPrivate(minutes: Int) {
         privateUntil = System.currentTimeMillis() + minutes * 60_000L
-        if (::prefs.isInitialized) prefs.edit().putLong("private_until", privateUntil).apply()
+        prefs?.edit()?.putLong("private_until", privateUntil)?.apply()
+        bump()
     }
 
     fun stopPrivate() {
         privateUntil = 0L
-        if (::prefs.isInitialized) prefs.edit().putLong("private_until", 0L).apply()
+        prefs?.edit()?.putLong("private_until", 0L)?.apply()
+        bump()
     }
 
     // ---------- التطبيقات المستثناة / المسموحة ----------
 
-    fun mode(): String {
-        if (!::prefs.isInitialized) return MODE_ALL
-        return prefs.getString("mode", MODE_ALL) ?: MODE_ALL
-    }
+    fun mode(): String = prefs?.getString("mode", MODE_ALL) ?: MODE_ALL
 
     fun setMode(m: String) {
-        if (::prefs.isInitialized) prefs.edit().putString("mode", m).apply()
+        prefs?.edit()?.putString("mode", m)?.apply()
+        bump()
     }
 
-    fun blockedApps(): Set<String> {
-        if (!::prefs.isInitialized) return emptySet()
-        return HashSet<String>(prefs.getStringSet("blocked", emptySet()) ?: emptySet())
-    }
+    fun blockedApps(): Set<String> =
+        HashSet<String>(prefs?.getStringSet("blocked", emptySet()) ?: emptySet())
 
-    fun allowedApps(): Set<String> {
-        if (!::prefs.isInitialized) return emptySet()
-        return HashSet<String>(prefs.getStringSet("allowed", emptySet()) ?: emptySet())
-    }
+    fun allowedApps(): Set<String> =
+        HashSet<String>(prefs?.getStringSet("allowed", emptySet()) ?: emptySet())
 
     fun setBlockedApps(s: Set<String>) {
-        if (::prefs.isInitialized) prefs.edit().putStringSet("blocked", HashSet<String>(s)).apply()
+        prefs?.edit()?.putStringSet("blocked", HashSet<String>(s))?.apply()
+        bump()
     }
 
     fun setAllowedApps(s: Set<String>) {
-        if (::prefs.isInitialized) prefs.edit().putStringSet("allowed", HashSet<String>(s)).apply()
+        prefs?.edit()?.putStringSet("allowed", HashSet<String>(s))?.apply()
+        bump()
     }
 
     fun blockApp(pkg: String) {
@@ -85,28 +95,41 @@ object PrivacyPolicy {
         setBlockedApps(s)
     }
 
+    // ---------- المصدر المجهول ----------
+
+    // تطبيقات بتمنع الإتاحة (زي البنوك) ما بنقدرش نعرف اسمها. لو في قواعد خصوصية، نتجاهل نسخها
+    fun blockUnknown(): Boolean = prefs?.getBoolean("block_unknown", true) ?: true
+
+    fun setBlockUnknown(v: Boolean) {
+        prefs?.edit()?.putBoolean("block_unknown", v)?.apply()
+        bump()
+    }
+
+    // هل فيه قواعد خصوصية أصلاً؟
+    fun hasRules(): Boolean = mode() == MODE_ALLOW_ONLY || blockedApps().isNotEmpty()
+
     // ---------- المسح التلقائي ----------
 
     // 0 = مقفول
-    fun autoWipeDays(): Int {
-        if (!::prefs.isInitialized) return 0
-        return prefs.getInt("auto_wipe_days", 0)
-    }
+    fun autoWipeDays(): Int = prefs?.getInt("auto_wipe_days", 0) ?: 0
 
     fun setAutoWipeDays(days: Int) {
-        if (::prefs.isInitialized) prefs.edit().putInt("auto_wipe_days", days).apply()
+        prefs?.edit()?.putInt("auto_wipe_days", days)?.apply()
+        bump()
     }
 
     // ---------- القرار ----------
 
-    // هل مسموح نلتقط نسخ جاي من التطبيق ده؟
+    // هل مسموح نلتقط نسخ جاي من التطبيق ده؟ (pkg = null معناها مصدر مجهول)
     fun allowsCapture(pkg: String?): Boolean {
-        if (!::prefs.isInitialized) return true
+        if (prefs == null) return true
         if (isPrivateMode()) return false
-        return if (mode() == MODE_ALLOW_ONLY) {
-            pkg != null && pkg in allowedApps()
-        } else {
-            pkg == null || pkg !in blockedApps()
+        if (mode() == MODE_ALLOW_ONLY) {
+            return pkg != null && pkg in allowedApps()
         }
+        if (pkg == null) {
+            return !(blockUnknown() && blockedApps().isNotEmpty())
+        }
+        return pkg !in blockedApps()
     }
 }
