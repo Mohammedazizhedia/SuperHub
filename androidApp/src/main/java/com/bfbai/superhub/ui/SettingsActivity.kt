@@ -87,6 +87,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -104,6 +105,7 @@ import com.bfbai.superhub.service.ShelfStyle
 import com.bfbai.superhub.service.SuperHubTileService
 import com.bfbai.superhub.service.ThemeEngine
 import com.bfbai.superhub.service.tr
+import com.bfbai.superhub.utils.DiagLog
 import com.bfbai.superhub.utils.HistoryRepository
 import com.bfbai.superhub.utils.PrivacyPolicy
 import kotlinx.coroutines.Dispatchers
@@ -280,7 +282,6 @@ private fun ColorPickerDialog(title: String, initial: Int, onPick: (Int) -> Unit
         title = { Text(title, color = p.text) },
         text = {
             Column {
-                // مربع التشبع والسطوع
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -316,7 +317,6 @@ private fun ColorPickerDialog(title: String, initial: Int, onPick: (Int) -> Unit
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                // شريط اللون
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -558,6 +558,84 @@ private fun AppPickerPage(onBack: () -> Unit) {
     }
 }
 
+// ---------- التطبيقات المختارة (بتظهر في قسم الخصوصية) ----------
+
+@Composable
+private fun SelectedAppRow(pkg: String, allow: Boolean) {
+    val ctx = LocalContext.current
+    val p = LocalPal.current
+    val label = remember(pkg) {
+        try {
+            ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (e: Exception) {
+            pkg
+        }
+    }
+    val icon by produceState<ImageBitmap?>(null, pkg) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                drawableToBitmap(ctx.packageManager.getApplicationIcon(pkg), 72).asImageBitmap()
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .clip(shape)
+            .background(p.card2)
+            .border(1.dp, p.stroke, shape)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(p.card)) {
+            val ic = icon
+            if (ic != null) Image(ic, null, Modifier.fillMaxSize())
+        }
+        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+            Text(label, color = p.text, fontSize = 13.sp, maxLines = 1)
+            Text(pkg, color = p.sub, fontSize = 9.sp, maxLines = 1)
+        }
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .clickable {
+                    val s = HashSet<String>(if (allow) PrivacyPolicy.allowedApps() else PrivacyPolicy.blockedApps())
+                    s.remove(pkg)
+                    if (allow) PrivacyPolicy.setAllowedApps(s) else PrivacyPolicy.setBlockedApps(s)
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Text("✕", color = p.danger, fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+private fun SelectedApps(allow: Boolean) {
+    val p = LocalPal.current
+    PrivacyPolicy.changes.collectAsState().value
+    val pkgs = (if (allow) PrivacyPolicy.allowedApps() else PrivacyPolicy.blockedApps()).toList().sorted()
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        if (pkgs.isEmpty()) {
+            Text(
+                if (allow) t("لسه ما اخترتش أي تطبيق: مفيش حاجة هتتلقط.", "No apps selected yet: nothing will be captured.")
+                else t("مفيش تطبيقات مستثناة.", "No excluded apps."),
+                color = p.sub, fontSize = 12.sp
+            )
+        } else {
+            for (pk in pkgs.take(15)) SelectedAppRow(pk, allow)
+            if (pkgs.size > 15) {
+                Text("+" + (pkgs.size - 15), color = p.sub, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+}
+
 // ---------- الشاشة الرئيسية للإعدادات ----------
 
 @Composable
@@ -565,10 +643,13 @@ private fun MainSettings(onBack: () -> Unit, openApps: () -> Unit) {
     val ctx = LocalContext.current
     val p = LocalPal.current
     ShelfSettings.changes.collectAsState().value
+    PrivacyPolicy.changes.collectAsState().value
     var running by remember { mutableStateOf(ClipboardAccessibilityService.instance != null) }
+    var shown by remember { mutableStateOf(ClipboardAccessibilityService.instance?.shelfShown == true) }
     LaunchedEffect(Unit) {
         while (true) {
             running = ClipboardAccessibilityService.instance != null
+            shown = ClipboardAccessibilityService.instance?.shelfShown == true
             delay(1500)
         }
     }
@@ -689,13 +770,24 @@ private fun MainSettings(onBack: () -> Unit, openApps: () -> Unit) {
                         )
                     }
                 }
-                Row(Modifier.padding(start = 16.dp, end = 8.dp, bottom = 12.dp)) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 16.dp, end = 8.dp, bottom = 12.dp)
+                ) {
                     Btn(t("إعدادات الإتاحة", "Accessibility"), filled = !running) {
                         val i = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         ctx.startActivity(i)
                     }
                     Btn(t("السجل", "History")) { ctx.startActivity(Intent(ctx, HistoryActivity::class.java)) }
+                    if (running) {
+                        Btn(if (shown) t("إخفاء الرف", "Hide shelf") else t("إظهار الرف", "Show shelf")) {
+                            val s = ClipboardAccessibilityService.instance
+                            if (s != null) shown = s.toggleShelf()
+                        }
+                    }
                 }
             }
             ShelfPreview()
@@ -856,9 +948,23 @@ private fun MainSettings(onBack: () -> Unit, openApps: () -> Unit) {
                         pmode = PrivacyPolicy.MODE_ALLOW_ONLY; PrivacyPolicy.setMode(pmode)
                     }
                 }
-                val cnt = if (pmode == PrivacyPolicy.MODE_ALLOW_ONLY) PrivacyPolicy.allowedApps().size else PrivacyPolicy.blockedApps().size
-                Note(t("المختار حالياً: ", "Currently selected: ") + cnt)
+                val allowMode = pmode == PrivacyPolicy.MODE_ALLOW_ONLY
+                Note(
+                    if (allowMode) t("هيتلقط من التطبيقات المختارة بس.", "Only selected apps are captured.")
+                    else t("التطبيقات المختارة مش هيتلقط منها أي نسخ.", "Selected apps are never captured.")
+                )
+                SelectedApps(allowMode)
                 Btn(t("اختيار التطبيقات", "Choose apps"), filled = true) { openApps() }
+
+                SwitchLine(
+                    t("تجاهل النسخ لو مصدرها مجهول", "Ignore copies from unknown sources"),
+                    t(
+                        "تطبيقات بتمنع الإتاحة (زي البنوك) ما بنقدرش نعرف اسمها. بيشتغل لو فيه تطبيقات مستثناة.",
+                        "Apps that block accessibility (banks) cannot be identified. Applies when you have excluded apps."
+                    ),
+                    PrivacyPolicy.blockUnknown()
+                ) { PrivacyPolicy.setBlockUnknown(it) }
+
                 Label(t("الوضع الخاص", "Private mode"))
                 Btn(if (priv) t("إيقاف الوضع الخاص", "Stop private mode") else t("تشغيل الوضع الخاص (30 دقيقة)", "Start private mode (30 min)")) {
                     if (priv) PrivacyPolicy.stopPrivate() else PrivacyPolicy.startPrivate(30)
@@ -948,7 +1054,7 @@ private fun MainSettings(onBack: () -> Unit, openApps: () -> Unit) {
                         ) {
                             if (id != 0) {
                                 AndroidView(
-                                    factory = { c -> ImageView(c).apply { setImageResource(id); setColorFilter(p.text.hashCode()) } },
+                                    factory = { c -> ImageView(c).apply { setImageResource(id); setColorFilter(p.text.toArgb()) } },
                                     modifier = Modifier.size(40.dp)
                                 )
                             } else {
@@ -960,7 +1066,7 @@ private fun MainSettings(onBack: () -> Unit, openApps: () -> Unit) {
                 }
             }
 
-            // ---- نسخ احتياطي ----
+                        // ---- نسخ احتياطي ----
             SectionCard(t("نسخ احتياطي واستعادة", "Backup & restore"), Icons.Default.Check) {
                 Btn(t("نسخ الإعدادات (JSON) للحافظة", "Copy settings (JSON)")) {
                     HistoryRepository.ignoreClipUntil = System.currentTimeMillis() + 1500
@@ -1003,6 +1109,17 @@ private fun MainSettings(onBack: () -> Unit, openApps: () -> Unit) {
                     val i = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                     i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     ctx.startActivity(i)
+                }
+                Btn(t("نسخ سجل التشخيص", "Copy diagnostics log")) {
+                    HistoryRepository.ignoreClipUntil = System.currentTimeMillis() + 1500
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val dump = DiagLog.dump(300).ifBlank { "(empty)" }
+                    cm.setPrimaryClip(ClipData.newPlainText("hubsync-diag", dump))
+                    Toast.makeText(ctx, tr("اتنسخ سجل التشخيص", "Diagnostics copied"), Toast.LENGTH_SHORT).show()
+                }
+                Btn(t("مسح سجل التشخيص", "Clear diagnostics log")) {
+                    DiagLog.clear()
+                    Toast.makeText(ctx, tr("اتمسح", "Cleared"), Toast.LENGTH_SHORT).show()
                 }
                 Btn(t("إيقاف الخدمة الآن", "Stop the service now"), danger = true) { dlg = "stop" }
                 Note(
