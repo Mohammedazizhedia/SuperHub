@@ -69,6 +69,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     // آخر نسخة اتعالجت (ختم وقتها من النظام)
     private var lastClipTs: Long = 0L
+    private var lastEvtPkg: String? = null
     private var lastCaptured: String? = null
 
     // آخر نص لصقناه إحنا من الرف: لو رجع من الحافظة في التقاط سلبي بنتجاهله
