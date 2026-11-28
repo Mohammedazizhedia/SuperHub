@@ -1244,7 +1244,7 @@ class ShelfController(
 
     // ---------- التقاط الحافظة بالتركيز ----------
 
-    /** النسخة الجديدة: بترجّع كمان ختم وقت النسخ من النظام */
+    /** بترجّع كمان ختم وقت النسخ من النظام */
     fun captureClip(onResult: (ClipSnap) -> Unit) {
         if (!added) {
             onResult(ClipSnap(null, null, false, 0L))
@@ -1266,17 +1266,24 @@ class ShelfController(
         captureClip { s -> onResult(s.text, s.uri, s.skipped) }
     }
 
+    // محاولات أكتر (لحد 6) وبتسجّل سبب الفشل في سجل التشخيص
     private fun attemptCapture(n: Int, onResult: (ClipSnap) -> Unit) {
         handler.postDelayed({
             var text: String? = null
             var uri: Uri? = null
             var skip = false
             var ts = 0L
+            var why: String
             try {
                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 val clip = cm.primaryClip
-                if (clip != null && clip.itemCount > 0) {
+                if (clip == null) {
+                    why = "clip=null"
+                } else if (clip.itemCount == 0) {
+                    why = "items=0"
+                } else {
                     val d = clip.description
+                    why = "mime=" + (if (d != null && d.mimeTypeCount > 0) d.getMimeType(0) else "?")
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && d != null) ts = d.timestamp
                     val sensitive = ShelfBehavior.ignoreSensitive &&
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
@@ -1294,16 +1301,18 @@ class ShelfController(
                     }
                 }
             } catch (e: Exception) {
+                why = "ex=" + e.javaClass.simpleName
             }
             val got = skip || uri != null || !text.isNullOrBlank()
-            if (!got && n < 2 && added) {
+            DiagLog.d("shelf", "capture try $n focus=${root.hasWindowFocus()} $why got=$got")
+            if (!got && n < 5 && added) {
                 attemptCapture(n + 1, onResult)
             } else {
                 lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 flushLayout()
                 onResult(ClipSnap(text, uri, skip, ts))
             }
-        }, if (n == 0) 40L else 110L)
+        }, if (n == 0) 60L else 160L)
     }
 
     private fun detectOf(text: String): Detection {
@@ -1861,7 +1870,6 @@ class ShelfController(
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         )
-        p.topMargin = headerPx
         p.setMargins(px(8), headerPx, px(8), px(8))
         layer.layoutParams = p
         diagLayer = layer
@@ -2626,11 +2634,11 @@ class ShelfController(
         ap.topMargin = px(6)
         ap.bottomMargin = px(8)
         act.layoutParams = ap
-        act.addView(pill(tr("لصق التالي", "Paste next"), color, true) { pasteNext(members) })
-        act.addView(pill(tr("تسمية", "Rename"), color, false) {
+        act.addView(pill(tr("لصق التالي", "Paste next"), color, true, true) { pasteNext(members) })
+        act.addView(pill(tr("تسمية", "Rename"), color, false, true) {
             openNameDialog(GroupNameActivity.MODE_RENAME, id, explicit)
         })
-        act.addView(pill(tr("فك", "Ungroup"), color, false) { HistoryRepository.ungroup(id) })
+        act.addView(pill(tr("فك", "Ungroup"), color, false, true) { HistoryRepository.ungroup(id) })
         box.addView(act)
 
         if (!collapsed) {
