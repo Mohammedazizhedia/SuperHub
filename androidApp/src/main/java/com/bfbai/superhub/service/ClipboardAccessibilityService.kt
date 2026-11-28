@@ -224,6 +224,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         clipListener?.let { clipboardManager.removePrimaryClipChangedListener(it) }
 
         val l = ClipboardManager.OnPrimaryClipChangedListener {
+            DiagLog.d("svc", "clip listener fired")
             val until = maxOf(ignoreClipUntil, HistoryRepository.ignoreClipUntil)
             if (System.currentTimeMillis() < until) return@OnPrimaryClipChangedListener
             DiagLog.d("svc", "clip changed event")
@@ -467,6 +468,10 @@ class ClipboardAccessibilityService : AccessibilityService() {
         if (event == null) return
         val pkg = event.packageName?.toString()
         val wt = wall(event.eventTime)
+        if (pkg != lastEvtPkg) {
+            lastEvtPkg = pkg
+            DiagLog.d("evt", "pkg=$pkg type=${AccessibilityEvent.eventTypeToString(event.eventType)}")
+        }
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> evalForeground(wt)
